@@ -21,13 +21,13 @@ var FeishuAdapter = window.FeishuAdapter || {
       /\/(docx|docs|wiki)\//.test(loc.pathname);
   },
 
-  async extract() {
+  async extract(options) {
     // 通道一：client_vars 接口精配（快且完整，不用滚动页面）
     let interfaceError = null;
     try {
       const token = InkFeishuDocx.docToken();
       if (!token) throw new Error('页面上未找到文档 token');
-      const ir = await InkFeishuDocx.extract(token);
+      const ir = await InkFeishuDocx.extract(token, options);
       ir.badge = 'precise'; // 本次提取实际走了接口，徽章升级（pipeline 按 IR 覆盖）
       return ir;
     } catch (e) {

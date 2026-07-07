@@ -41,7 +41,7 @@ var InkFeishuDocx = window.InkFeishuDocx || {
   },
 
   /** 接口化提取主入口：token → IR（失败抛错，调用方负责回退） */
-  async extract(token) {
+  async extract(token, opts) {
     const { blockMap, truncated } = await this.fetchAllBlocks(token);
     let rootId = blockMap[token] ? token : null;
     if (!rootId) {
@@ -55,7 +55,9 @@ var InkFeishuDocx = window.InkFeishuDocx || {
       warnings.push(`文档超过 ${this.MAX_CHUNKS} 个数据分片，已截断采集，导出可能不完整。`);
     }
 
-    const report = { missing: 0, unsupported: {} };
+    const report = { missing: 0, unsupported: {}, commentIds: [], _seenComments: new Set() };
+    // 全文评论挂在 page 根块上，划线评论挂在具体 block 上——根块也要收
+    this._collectCommentIds(blockMap[rootId].data, report);
     const container = document.createElement('div');
     this._renderChildren(blockMap[rootId].data.children || [], blockMap, container, report);
 
@@ -70,13 +72,22 @@ var InkFeishuDocx = window.InkFeishuDocx || {
 
     InkIR.normalizeContainer(container);
 
-    return InkIR.create({
+    const ir = InkIR.create({
       title: this._plain(blockMap[rootId].data.text) ||
         InkIR.pickTitle(null, /\s*[-–]\s*(飞书云文档|飞书|Feishu Docs|Lark Docs).*$/i),
       siteName: '飞书文档',
       contentEl: container,
       warnings,
     });
+
+    if ((!opts || opts.includeComments !== false) && report.commentIds.length) {
+      try {
+        ir.annotations = await this._fetchComments(token, report.commentIds);
+      } catch (e) {
+        ir.warnings.push('评论拉取失败（' + (e.message || e) + '），仅导出正文。');
+      }
+    }
+    return ir;
   },
 
   /* ---------- 分页拉取 ---------- */
@@ -175,6 +186,97 @@ var InkFeishuDocx = window.InkFeishuDocx || {
       if (found !== null) return found;
     }
     return null;
+  },
+
+  /* ---------- 评论采集 ---------- */
+
+  /** 块上的 comments 字段装的是评论 id；按块出现顺序收集 = 评论按文档顺序输出 */
+  _collectCommentIds(d, report) {
+    if (!d || !Array.isArray(d.comments)) return;
+    for (const id of d.comments) {
+      if (id && !report._seenComments.has(id)) {
+        report._seenComments.add(id);
+        report.commentIds.push(id);
+      }
+    }
+  },
+
+  /**
+   * 评论正文走 comment/batch 接口按 id 批量换取（页面自身的同款调用）。
+   * quote 字段是被划线的原文——直接对接现有的「==高亮==[^脚注]」锚定体系；
+   * is_whole=1 是全文评论，进文末评论区；comment_list 首条是评论、其余是回复。
+   */
+  async _fetchComments(token, ids) {
+    const byId = {};
+    for (let i = 0; i < ids.length; i += 100) {
+      const data = await this._commentBatch(token, ids.slice(i, i + 100));
+      Object.assign(byId, (data && data.comments) || {});
+    }
+    const out = [];
+    for (const id of ids) {
+      const c = byId[id];
+      if (!c || c.delete_flag) continue;
+      const msgs = (c.comment_list || []).filter(m => m && !m.delete_flag);
+      if (!msgs.length) continue;
+      const head = msgs[0];
+      const toAnn = (m, extraTime) => InkIR.annotation({
+        kind: c.is_whole ? 'page' : 'inline',
+        author: m.name || null,
+        time: m.create_time ? m.create_time + (extraTime || '') : null,
+        content: this._commentText(m.content),
+      });
+      const ann = toAnn(head, c.finish ? ' · 已解决' : '');
+      if (!c.is_whole) ann.anchorText = c.quote || null;
+      ann.replies = msgs.slice(1).map(m => toAnn(m));
+      out.push(ann);
+    }
+    return out;
+  },
+
+  async _commentBatch(token, ids) {
+    const body = new URLSearchParams();
+    body.set('obj_type', '22'); // 22 = docx（抓包实测值）
+    body.set('token', token);
+    for (const id of ids) body.append('comment_ids', id);
+    body.set('need_reply', 'true');
+    const headers = {};
+    // 页面自身的调用带 x-csrftoken（值来自 cookie）；读得到就带上，读不到先试裸调
+    const csrf = (document.cookie.match(/(?:^|;\s*)_?csrf_token=([^;]+)/) || [])[1];
+    if (csrf) headers['x-csrftoken'] = decodeURIComponent(csrf);
+    let lastErr = null;
+    for (const base of this._apiBases()) {
+      try {
+        const res = await fetch(base + '/space/api/comment/batch', {
+          method: 'POST', credentials: 'include', headers, body,
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const json = await res.json();
+        if (!json || json.code !== 0 || !json.data) {
+          throw new Error('code=' + (json && json.code));
+        }
+        return json.data;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr;
+  },
+
+  /** 评论接口在独立域名（internal-api-space.*）；未知租户域退回同源尝试 */
+  _apiBases() {
+    const m = location.hostname.match(/(feishu\.cn|larksuite\.com)$/);
+    const bases = m ? ['https://internal-api-space.' + m[1]] : [];
+    bases.push(location.origin);
+    return bases;
+  },
+
+  /** 评论内容是带标记的富文本（<at> 提及、HTML 实体）→ 可读纯文本。
+   *  DOMParser 产出惰性文档：不加载资源、不执行脚本，适合处理不可信输入 */
+  _commentText(raw) {
+    let s = String(raw || '');
+    s = s.replace(/<at\b[^>]*>([\s\S]*?)<\/at>/gi, '$1'); // @提及保留可读名字
+    const doc = new DOMParser().parseFromString(s, 'text/html');
+    return (doc.body.textContent || '').trim();
   },
 
   /* ---------- easysync 文本解码 ---------- */
@@ -278,6 +380,7 @@ var InkFeishuDocx = window.InkFeishuDocx || {
       }
       const d = block.data;
       const type = d.type || '';
+      this._collectCommentIds(d, report);
 
       if (type === 'bullet' || type === 'ordered' || type === 'todo') {
         const wantTag = type === 'ordered' ? 'ol' : 'ul';
@@ -464,6 +567,7 @@ var InkFeishuDocx = window.InkFeishuDocx || {
         }
         const cellBlock = cell && map[cell.block_id];
         if (cellBlock && cellBlock.data) {
+          this._collectCommentIds(cellBlock.data, report);
           this._renderChildren(cellBlock.data.children || [], map, td, report);
         } else if (cell) {
           report.missing += 1;
