@@ -12,6 +12,7 @@ const DEFAULTS = {
   mdEmphasis: '*',
   mdFence: '```',
   mdLinkStyle: 'inlined',
+  complexTable: 'html',
   keepHistory: true,
   customRules: [],
 };
@@ -29,7 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     $(key).checked = !!s[key];
   }
   for (const key of ['frontMatterTags', 'commentStyle', 'imageStrategy', 'filenameTemplate',
-                     'mdBullet', 'mdEmphasis', 'mdFence', 'mdLinkStyle']) {
+                     'mdBullet', 'mdEmphasis', 'mdFence', 'mdLinkStyle', 'complexTable']) {
     $(key).value = s[key];
   }
 
@@ -175,6 +176,7 @@ async function save() {
     mdEmphasis: $('mdEmphasis').value,
     mdFence: $('mdFence').value,
     mdLinkStyle: $('mdLinkStyle').value,
+    complexTable: $('complexTable').value,
     keepHistory: $('keepHistory').checked,
     customRules: collectRules(),
   };

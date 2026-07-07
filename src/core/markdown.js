@@ -94,6 +94,37 @@ const InkMarkdown = {
       },
     });
 
+    // 复杂表格（prepareTables 标记）：净化后整表输出 HTML，结构零丢失
+    td.addRule('complexTableAsHtml', {
+      filter: (node) => node.nodeName === 'TABLE' && node.hasAttribute('data-ink-keep-html'),
+      replacement: (content, node) => {
+        const clone = node.cloneNode(true);
+        clone.removeAttribute('data-ink-keep-html');
+        // 只保留结构与内容必需的属性，剥掉站点的 class/style/id 噪音
+        const KEEP_ATTRS = ['rowspan', 'colspan', 'align', 'src', 'alt', 'href'];
+        [clone, ...clone.querySelectorAll('*')].forEach((el) => {
+          Array.from(el.attributes).forEach((attr) => {
+            if (!KEEP_ATTRS.includes(attr.name)) el.removeAttribute(attr.name);
+          });
+        });
+        return '\n\n' + clone.outerHTML.replace(/>\s+</g, '><') + '\n\n';
+      },
+    });
+
+    // GFM 单元格：内容里的 | 全部转义为 \|。
+    // 这是在「确定属于单元格内容」的作用域里做的，正文中的 | 不受影响。
+    // 注意不能在 DOM 阶段预转义——Turndown 会把 \ 再转义成 \\。
+    td.addRule('tableCellEscapePipes', {
+      filter: (node) =>
+        (node.nodeName === 'TH' || node.nodeName === 'TD') &&
+        !(node.closest && node.closest('[data-ink-keep-html]')),
+      replacement: (content, node) => {
+        const safe = content.replace(/\n+/g, ' ').replace(/\|/g, '\\|');
+        const index = Array.prototype.indexOf.call(node.parentNode.childNodes, node);
+        return (index === 0 ? '| ' : ' ') + safe.trim() + ' |';
+      },
+    });
+
     // 公式（restoreMath 的产物）：原样输出 TeX，不做任何转义
     td.addRule('math', {
       filter: (node) => node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-ink-math'),
@@ -112,13 +143,57 @@ const InkMarkdown = {
     return td;
   },
 
+  /* ==================== 表格策略 ====================
+   *
+   * GFM 表格表达能力有限：不支持嵌套表格、rowspan/colspan、块级单元格。
+   * 硬转的结果就是结构性丢失或表格碎裂。策略是「先分类，再转换」：
+   *
+   * 1. GFM 可表达（规则网格 + 有表头）→ 转 GFM；
+   *    单元格内的 | 在生成阶段转义为 \|（作用域只在单元格内，
+   *    正文里的 | 不受影响——这就是「内容竖线」与「边界竖线」的区分方式；
+   *    GFM 规范保证表格单元格中即使 code span 里的 \| 也会还原为 |）。
+   * 2. GFM 不可表达（嵌套 / rowspan / colspan / 无表头）→
+   *    默认整表保留为净化后的 HTML（GFM、Obsidian、Typora 都原生渲染
+   *    HTML 表格），结构零丢失；用户也可在设置里选择「强制扁平化」。
+   */
+
+  /** 表格结构是否超出 GFM 的表达能力 */
+  isComplexTable(table) {
+    if (table.querySelector('table')) return true;
+    if (table.querySelector('[rowspan]:not([rowspan="1"]), [colspan]:not([colspan="1"])')) return true;
+    const firstRow = table.querySelector('tr');
+    if (!firstRow) return true;
+    // 无表头行：GFM 表格必须有 header 行，硬转会把首行数据当表头
+    if (!Array.from(firstRow.children).every(c => c.tagName === 'TH')) return true;
+    return false;
+  },
+
+  /**
+   * 表格预处理入口：
+   * - complexTable='html'（默认）：复杂表格打上 data-ink-keep-html 标记，
+   *   由专用规则原样输出净化后的 HTML；
+   * - complexTable='flatten'：不标记，走扁平化有损降级。
+   * 随后对「将转为 GFM 的表格」做单元格扁平化。
+   */
+  prepareTables(root, opts) {
+    const mode = (opts && opts.complexTable) || 'html';
+    if (mode === 'html') {
+      root.querySelectorAll('table').forEach((table) => {
+        if (table.parentElement && table.parentElement.closest('table')) return; // 只标记顶层表格
+        if (this.isComplexTable(table)) table.setAttribute('data-ink-keep-html', '1');
+      });
+    }
+    this.flattenTableCells(root);
+  },
+
   /**
    * 表格单元格扁平化：GFM 表格不允许单元格里出现块级结构，
    * 这是导出表格「碎掉」的头号原因。把 <p>/<div>/<ul> 等压成 <br> 分隔的行内内容，
-   * <pre> 压成行内 <code>。
+   * <pre> 压成行内 <code>。已标记保留 HTML 的表格跳过（结构原样输出）。
    */
   flattenTableCells(root) {
     root.querySelectorAll('td, th').forEach((cell) => {
+      if (cell.closest('[data-ink-keep-html]')) return;
       // 代码块 → 行内 code（换行折叠为空格）
       cell.querySelectorAll('pre').forEach((pre) => {
         const code = document.createElement('code');
@@ -265,9 +340,14 @@ const InkMarkdown = {
       includeTitle: true,
     }, options);
 
-    if (ir.contentEl) this.flattenTableCells(ir.contentEl);
+    // 在克隆上做表格预处理：同一份 IR 缓存可以用不同设置反复导出，互不污染
+    let workEl = null;
+    if (ir.contentEl) {
+      workEl = ir.contentEl.cloneNode(true);
+      this.prepareTables(workEl, opts);
+    }
     const td = this.createTurndown(opts);
-    let body = td.turndown(ir.contentEl ? ir.contentEl.innerHTML : '');
+    let body = td.turndown(workEl ? workEl.innerHTML : '');
     // 清理不可见字符（零宽空格/BOM/方向控制符）与 nbsp，收敛多余空行
     body = body
       .replace(/[\u200b\u200c\u200d\u200e\u200f\ufeff]/g, '')

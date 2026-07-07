@@ -137,6 +137,16 @@
         </div>
         <div class="row">
           <div>
+            <span class="label">复杂表格处理</span>
+            <span class="hint">嵌套表格、合并单元格（rowspan/colspan）等 Markdown 语法无法表达的表格</span>
+          </div>
+          <select id="complexTable" class="select">
+            <option value="html">保留为 HTML 表格（结构零丢失，推荐）</option>
+            <option value="flatten">强制扁平化为纯 Markdown（有损）</option>
+          </select>
+        </div>
+        <div class="row">
+          <div>
             <span class="label">链接样式</span>
             <span class="hint">内联：<code>[文字](url)</code>；引用：<code>[文字][1]</code> 并在文末集中列出</span>
           </div>

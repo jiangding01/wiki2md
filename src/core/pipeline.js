@@ -27,6 +27,7 @@
     mdEmphasis: '*',
     mdFence: '```',
     mdLinkStyle: 'inlined',
+    complexTable: 'html',
     keepHistory: true,
     customRules: [],
   };

@@ -1,0 +1,14 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><title>管道与嵌套表格</title></head><body>
+<article>
+<h1>管道与嵌套表格</h1>
+<p>这篇文章用来测试表格边界问题。正文里的竖线 a | b 不在表格里，不应该被动。这里需要足够多的文字让 Readability 认出正文区域，所以再啰嗦几句关于表格转换边界情况的说明文字，凑够阈值即可。</p>
+<table>
+  <tr><th>场景</th><th>示例</th></tr>
+  <tr><td>正则</td><td>匹配 A|B 或 <code>x || y</code></td></tr>
+  <tr><td>嵌套表格</td><td>
+    <table><tr><th>内层列1</th><th>内层列2</th></tr><tr><td>甲</td><td>乙</td></tr></table>
+  </td></tr>
+  <tr><td rowspan="2">合并行</td><td>第一行</td></tr>
+  <tr><td>第二行</td></tr>
+</table>
+</article></body></html>

@@ -190,6 +190,32 @@ async function runPipeline(page, fixture, options) {
     assert(!result.hasH2, '剔除选择器生效（h2 被移除）');
   }
 
+  /* ---------- 用例 8：表格边界（管道转义 / 嵌套表格 / rowspan） ---------- */
+  console.log('\n[8] 表格边界 · | 转义与复杂表格降级策略');
+  {
+    // 默认模式：复杂表格保留为净化 HTML
+    const { markdown: md } = await runPipeline(page, 'tables.html', {
+      frontMatter: false, includeComments: false, complexTable: 'html',
+    });
+    assert(md.includes('正文里的竖线 a | b'), '正文中的 | 不被转义（作用域只在单元格）');
+    assert(md.includes('<table>'), '嵌套/rowspan 表格保留为 HTML');
+    assert(md.includes('<th>内层列1</th>'), '嵌套内层表格结构完整');
+    assert(md.includes('rowspan="2"'), 'rowspan 属性保留');
+    assert(!md.includes('内层列1内层列2甲乙'), '不再把嵌套表格压成一坨文本');
+    assert(!/<table[^>]*class=/.test(md), '保留的 HTML 已净化（无 class 噪音）');
+
+    // 扁平化模式（用户显式选择的有损降级）
+    const { markdown: flat } = await runPipeline(page, 'tables.html', {
+      frontMatter: false, includeComments: false, complexTable: 'flatten',
+    });
+    assert(!flat.includes('<table'), '扁平化模式：无 HTML 表格');
+    const pipeRow = flat.split('\n').find(l => l.includes('正则'));
+    assert(!!pipeRow && pipeRow.includes('A\\|B') && pipeRow.includes('`x \\|\\| y`'),
+      '单元格内 |（含 code span 内）转义为 \\|', pipeRow);
+    const boundaryPipes = pipeRow ? (pipeRow.replace(/\\\|/g, '').match(/\|/g) || []).length : 0;
+    assert(boundaryPipes === 3, '转义后该行仍是两列结构（恰好 3 个边界 |）', `边界|数=${boundaryPipes}: ${pipeRow}`);
+  }
+
   await browser.close();
 
   console.log('\n' + (failures === 0 ? '✅ 全部通过' : `❌ ${failures} 项失败`));
