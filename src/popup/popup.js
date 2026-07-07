@@ -116,12 +116,20 @@ function friendlyError(msg) {
   return m || '未知错误';
 }
 
-async function analyze() {
+async function analyze(opts) {
+  // 静默模式：结果已在屏时（如切换「导出评论」触发的重分析）不切回加载骨架——
+  // 整卡片闪一下再闪回来非常刺眼，原地等数据回来直接更新数字即可
+  const quiet = !!(opts && opts.quiet) && $('state-ready') &&
+    !$('state-ready').classList.contains('hidden');
   state.analyzing = true;
-  $('state-ready').classList.add('hidden');
-  $('state-error').classList.add('hidden');
-  $('state-loading').classList.remove('hidden');
-  $('loading-text').textContent = '正在研墨，分析页面…';
+  if (!quiet) {
+    $('state-ready').classList.add('hidden');
+    $('state-error').classList.add('hidden');
+    $('state-loading').classList.remove('hidden');
+    $('loading-text').textContent = '正在研墨，分析页面…';
+  } else {
+    status('正在更新分析…');
+  }
   let res = null;
   try {
     res = await sendToPage({
@@ -136,6 +144,7 @@ async function analyze() {
     return showError('页面分析失败', friendlyError(res && res.error));
   }
   renderAnalysis(res);
+  if (quiet) status('');
 }
 
 /* ---------- 渲染 ---------- */
@@ -343,10 +352,10 @@ function bindEvents() {
     persistPrefs({ frontMatter: $('opt-frontmatter').checked });
   });
 
-  // 切换「导出评论」需要重新分析（评论是异步拉取的）
+  // 切换「导出评论」需要重新分析（评论是异步拉取的）——静默刷新，界面不闪
   $('opt-comments').addEventListener('change', () => {
     persistPrefs({ includeComments: $('opt-comments').checked });
-    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze();
+    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze({ quiet: true });
   });
 }
 

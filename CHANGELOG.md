@@ -29,6 +29,13 @@
 - `InkSettings.DEFAULTS` 冻结（含 customRules 数组），杜绝共享默认值被调用方原地修改污染
 - stats() 元素分类改用 `localName`，XHTML 页面上图片/表格数不再误计为代码块
 
+### 修复（真机测试反馈）
+
+- 批量导出页：长 URL 溢出容器——`text-overflow: ellipsis` 需要块级元素才生效，
+  标题与链接改为 `display: block`，超长部分显示省略号
+- popup 切换「导出评论」开关不再整卡闪烁：结果已在屏时改为静默重分析，
+  数据回来后原地更新统计数字
+
 ## [1.0.0] - 2026-07-07
 
 摘墨 Inkmark 首个正式版。由原 wiki2md（仅支持 Confluence 单页导出，归档于 `legacy-v1` 分支）

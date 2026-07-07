@@ -65,11 +65,14 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
 .tab-item input { flex: none; accent-color: var(--cinnabar); }
 .tab-favicon { flex: none; width: 16px; height: 16px; border-radius: 3px; }
 .tab-info { flex: 1; min-width: 0; }
+/* display:block 是省略号生效的前提——行内元素不裁剪，长 URL 会撑破容器 */
 .tab-title {
+  display: block;
   font-size: 13px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tab-url {
+  display: block;
   font-size: 11px; color: var(--ink-faint);
   font-family: var(--font-mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
