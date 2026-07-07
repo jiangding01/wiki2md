@@ -321,6 +321,8 @@ body {
   transition: all .15s;
 }
 .btn-ghost:hover { color: var(--cinnabar); border-color: var(--cinnabar); background: var(--cinnabar-mist); }
+.btn-tree { width: 100%; font-size: 12px; }
+.btn-tree:disabled { opacity: .6; cursor: wait; }
 
 .status-line {
   min-height: 16px;

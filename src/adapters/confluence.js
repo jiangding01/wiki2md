@@ -191,6 +191,60 @@ const ConfluenceAdapter = {
     return ann;
   },
 
+  /* ---------- 页面树批量导出（REST API，同源自动携带登录态） ---------- */
+
+  async _apiGet(url) {
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+
+  /** 某页面的直接子页面（分页拉全） */
+  async fetchChildren(pageId) {
+    const base = this._baseUrl();
+    let url = `${base}/rest/api/content/${pageId}/child/page?limit=50`;
+    const out = [];
+    for (let i = 0; url && i < 10; i++) {
+      const data = await this._apiGet(url);
+      out.push(...(data.results || []).map(p => ({ id: p.id, title: p.title })));
+      url = (data._links && data._links.next)
+        ? ((data._links.base || base) + data._links.next)
+        : null;
+    }
+    return out;
+  },
+
+  /** 拉取页面渲染后的 HTML（export_view 与页面渲染同构，可复用清洗逻辑） */
+  async fetchPageHtml(pageId) {
+    const base = this._baseUrl();
+    const data = await this._apiGet(
+      `${base}/rest/api/content/${pageId}?expand=body.export_view,history`);
+    return {
+      title: data.title || String(pageId),
+      html: (data.body && data.body.export_view && data.body.export_view.value) || '',
+      author: data.history && data.history.createdBy && data.history.createdBy.displayName,
+    };
+  },
+
+  /** API 返回的 HTML → IR，与单页提取共享全部规范化逻辑 */
+  htmlToIR(pageMeta, pageUrl) {
+    const container = document.createElement('div');
+    container.innerHTML = pageMeta.html;
+    InkIR.removeNoise(container, ['.conf-macro.output-inline[data-macro-name="toc"]', '.expand-control']);
+    this._normalizeCodeMacros(container);
+    this._normalizePanels(container);
+    this._normalizeImages(container);
+    InkIR.fixLazyImages(container);
+    InkIR.absolutizeUrls(container, pageUrl);
+    return InkIR.create({
+      title: pageMeta.title,
+      byline: pageMeta.author || null,
+      siteName: 'Confluence',
+      url: pageUrl,
+      contentEl: container,
+    });
+  },
+
   _title() {
     const t = document.querySelector('#title-text');
     if (t) return t.textContent.trim();

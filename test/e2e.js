@@ -330,6 +330,50 @@ async function runPipeline(page, fixture, options) {
     assert(grid.html.includes('rowspan="2"'), 'html 保守模式仍原样保留结构');
   }
 
+  /* ---------- 用例 13：Confluence 页面树批量导出（REST mock + ZIP 解包断言） ---------- */
+  console.log('\n[13] 页面树导出 · 层级镜像 / 失败报告');
+  {
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/confluence-page.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const tree = await page.evaluate(async () => {
+      // mock 同源 REST API：128450 → 子页 200；200 → 孙页 300；300 → 无子页且正文拉取失败
+      const json = (obj) => Promise.resolve({ ok: true, json: () => Promise.resolve(obj) });
+      window.fetch = (url) => {
+        url = String(url);
+        if (url.includes('/content/128450/child/page')) return json({ results: [{ id: '200', title: '子页面A' }] });
+        if (url.includes('/content/200/child/page')) return json({ results: [{ id: '300', title: '孙页面B' }, { id: '400', title: '坏页面C' }] });
+        if (url.includes('/content/300/child/page') || url.includes('/content/400/child/page')) return json({ results: [] });
+        if (url.includes('/content/200?expand')) return json({ title: '子页面A', body: { export_view: { value: '<p>A 的内容</p>' } } });
+        if (url.includes('/content/300?expand')) return json({ title: '孙页面B', body: { export_view: { value: '<h2>小节</h2><p>B 的正文</p>' } } });
+        if (url.includes('/content/400?expand')) return Promise.resolve({ ok: false, status: 500 });
+        return Promise.resolve({ ok: false, status: 404 });
+      };
+      // 拦截 ZIP 下载
+      let captured = null;
+      InkExporter.downloadBlob = (blob, filename) => { captured = { blob, filename }; };
+
+      const res = await window.__inkmark.handleExportTree({ includeComments: false, frontMatter: false });
+      if (!captured) return { res, files: [] };
+      const zip = await JSZip.loadAsync(captured.blob);
+      const files = Object.keys(zip.files).filter(n => !zip.files[n].dir).sort();
+      const bContent = await (zip.file('支付网关重构方案/子页面A/孙页面B.md') || { async: () => '' }).async('string');
+      const report = await (zip.file('导出报告.md') || { async: () => '' }).async('string');
+      return { res, files, bContent, report, filename: captured.filename };
+    });
+    assert(tree.res.ok && tree.res.pages === 3, '根页 + 子 + 孙共 3 页导出成功', JSON.stringify(tree.res));
+    assert(tree.files.includes('支付网关重构方案.md') &&
+           tree.files.includes('支付网关重构方案/子页面A.md') &&
+           tree.files.includes('支付网关重构方案/子页面A/孙页面B.md'),
+      'ZIP 目录镜像页面树层级', tree.files.join(', '));
+    assert(tree.bContent.includes('## 小节') && tree.bContent.includes('B 的正文'),
+      '子页面 HTML 经完整转换管线输出 Markdown');
+    assert(tree.res.failed === 1 && tree.report.includes('坏页面C'),
+      '失败页面进入 ZIP 内导出报告，不静默丢失', tree.report);
+    assert(tree.filename.includes('页面树') && tree.filename.endsWith('.zip'), 'ZIP 文件名含标识');
+  }
+
   await browser.close();
 
   /* ---------- 用例 10：注入清单一致性（防「忘记注册新文件」类回归） ---------- */

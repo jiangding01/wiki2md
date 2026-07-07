@@ -149,6 +149,82 @@
     throw new Error('未知导出动作: ' + action);
   }
 
+  /**
+   * Confluence 页面树批量导出：当前页 + 全部子孙页面 → 一个 ZIP（目录镜像层级）。
+   * 全程走同源 REST API，不打开任何标签页。评论不随树导出（每页多一次 API，
+   * 大空间下太慢）；失败页面写入 ZIP 内的「导出报告.md」，绝不静默丢失。
+   */
+  const TREE_MAX_PAGES = 300;
+
+  async function handleExportTree(options) {
+    const settings = await loadSettings(options);
+    window.__inkCustomRules = settings.customRules || [];
+    const adapter = InkAdapters.resolve();
+    if (adapter.id !== 'confluence') {
+      return { ok: false, error: '页面树导出目前仅支持 Confluence 页面' };
+    }
+    const rootId = adapter._pageId();
+    if (!rootId) return { ok: false, error: '未能识别当前页面的 pageId' };
+
+    const base = adapter._baseUrl();
+    const rootIR = await getIR(settings);
+    const safe = (s) => String(s || 'untitled').replace(/[\\/:*?"<>|\n\r]+/g, '_').trim().slice(0, 80) || 'untitled';
+
+    const nodes = [{ ir: rootIR, path: [] , title: rootIR.title }];
+    const queue = [{ id: rootId, path: [rootIR.title] }];
+    const failures = [];
+    let fetched = 1;
+
+    while (queue.length) {
+      const cur = queue.shift();
+      let children = [];
+      try {
+        children = await adapter.fetchChildren(cur.id);
+      } catch (e) {
+        failures.push(`页面 ${cur.id} 的子页面列表拉取失败：${e.message}`);
+        continue;
+      }
+      for (const child of children) {
+        if (fetched >= TREE_MAX_PAGES) {
+          failures.push(`超出 ${TREE_MAX_PAGES} 页安全上限，「${child.title}」及之后的页面未导出`);
+          queue.length = 0;
+          break;
+        }
+        fetched += 1;
+        progress(`抓取第 ${fetched} 页：${child.title}`);
+        try {
+          const meta = await adapter.fetchPageHtml(child.id);
+          const url = `${base}/pages/viewpage.action?pageId=${child.id}`;
+          nodes.push({ ir: adapter.htmlToIR(meta, url), path: cur.path, title: meta.title });
+          queue.push({ id: child.id, path: cur.path.concat(meta.title) });
+        } catch (e) {
+          failures.push(`「${child.title || child.id}」抓取失败：${e.message}`);
+        }
+      }
+    }
+
+    progress('正在转换并打包…');
+    const zip = new JSZip();
+    const renderOpts = Object.assign({}, settings, { includeComments: false });
+    const used = new Set();
+    for (const n of nodes) {
+      const dir = n.path.map(safe).join('/');
+      let name = safe(n.title);
+      let full = (dir ? dir + '/' : '') + name + '.md';
+      for (let k = 2; used.has(full); k++) full = (dir ? dir + '/' : '') + `${name}-${k}.md`;
+      used.add(full);
+      zip.file(full, InkMarkdown.render(n.ir, renderOpts));
+    }
+    if (failures.length) {
+      zip.file('导出报告.md',
+        `# 页面树导出报告\n\n成功导出 ${nodes.length} 页。以下 ${failures.length} 项失败：\n\n` +
+        failures.map(f => `- ${f}`).join('\n') + '\n');
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    InkExporter.downloadBlob(blob, InkExporter.buildFilename('{title}-页面树', rootIR, 'zip'));
+    return { ok: true, pages: nodes.length, failed: failures.length };
+  }
+
   async function handleExportSelection(options) {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) {
@@ -178,7 +254,7 @@
   }
 
   // 供测试环境直接调用（fixture 页面里没有 chrome.runtime）
-  window.__inkmark = { getIR, handleAnalyze, handleExport, handleExportSelection, loadSettings };
+  window.__inkmark = { getIR, handleAnalyze, handleExport, handleExportSelection, handleExportTree, loadSettings };
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -187,6 +263,7 @@
         if (msg.type === 'INK_ANALYZE') return await handleAnalyze(msg.options);
         if (msg.type === 'INK_EXPORT') return await handleExport(msg.action, msg.options);
         if (msg.type === 'INK_EXPORT_SELECTION') return await handleExportSelection(msg.options);
+        if (msg.type === 'INK_EXPORT_TREE') return await handleExportTree(msg.options);
         return { ok: false, error: '未知消息类型' };
       } catch (e) {
         console.error('[inkmark]', e);

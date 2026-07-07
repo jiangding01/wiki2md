@@ -132,6 +132,9 @@ function renderAnalysis(res) {
   badge.textContent = res.adapter.name + (res.adapter.badge === 'experimental' ? ' · 实验性' : '');
   badge.className = 'badge ' + res.adapter.badge;
 
+  // 页面树导出：Confluence 专属能力
+  $('btn-tree').classList.toggle('hidden', res.adapter.id !== 'confluence');
+
   // 站点名与适配器名相同则不重复展示
   $('doc-site').textContent = (res.siteName && res.siteName !== res.adapter.name) ? res.siteName : '';
 
@@ -244,10 +247,27 @@ async function doPreview() {
 
 /* ---------- 事件 ---------- */
 
+async function doExportTree() {
+  const btn = $('btn-tree');
+  btn.disabled = true;
+  btn.textContent = '🌳 抓取页面树中…';
+  try {
+    const res = await sendToPage({ type: 'INK_EXPORT_TREE', options: exportOptions() });
+    if (!res.ok) throw new Error(res.error);
+    status(`已导出 ${res.pages} 页` + (res.failed ? `（${res.failed} 项失败，详见 ZIP 内导出报告）` : ''));
+  } catch (e) {
+    status('页面树导出失败：' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🌳 导出页面树（含全部子页面）';
+  }
+}
+
 function bindEvents() {
   $('btn-download').addEventListener('click', doDownload);
   $('btn-copy').addEventListener('click', doCopy);
   $('btn-preview').addEventListener('click', doPreview);
+  $('btn-tree').addEventListener('click', doExportTree);
   $('btn-settings').addEventListener('click', () => {
     if (IS_EXTENSION) chrome.runtime.openOptionsPage();
   });
