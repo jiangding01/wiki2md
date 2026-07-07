@@ -15,41 +15,9 @@
   if (window.__INKMARK_LOADED__) return; // 防重复注入
   window.__INKMARK_LOADED__ = true;
 
-  const DEFAULTS = {
-    frontMatter: true,
-    includeTitle: true,
-    includeComments: true,
-    commentStyle: 'both',
-    imageStrategy: 'remote',
-    filenameTemplate: '{title}',
-    frontMatterTags: 'clippings',
-    mdBullet: '-',
-    mdEmphasis: '*',
-    mdFence: '```',
-    mdLinkStyle: 'inlined',
-    complexTable: 'auto',
-    highlightAnchors: true,
-    keepHistory: true,
-    customRules: [],
-  };
-
-  /**
-   * 设置合并：默认值 ← 存储 ← 本次消息覆盖。
-   * 存储策略「本地为主、同步尽力」：storage.sync 单项仅 8KB，自定义规则多了会超限，
-   * 所以写入方总是写 local（必成）并尽力写 sync（跨设备）；读取时 local 优先，
-   * local 为空（如新设备刚同步过来）再读 sync。
-   */
+  /** 设置合并：默认值 ← 存储 ← 本次消息覆盖（实现见 core/settings.js，全插件唯一） */
   async function loadSettings(overrides) {
-    let stored = {};
-    try {
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
-        if (!stored) {
-          stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
-        }
-      }
-    } catch (e) { /* 测试环境无 chrome */ }
-    return Object.assign({}, DEFAULTS, stored || {}, overrides || {});
+    return InkSettings.merged(overrides);
   }
 
   function progress(text) {

@@ -1,42 +1,11 @@
 /** 摘墨 · 设置页（通用 / Markdown 风格 / 站点规则 / 导出历史） */
 
-const DEFAULTS = {
-  frontMatter: true,
-  frontMatterTags: 'clippings',
-  includeTitle: true,
-  includeComments: true,
-  commentStyle: 'both',
-  imageStrategy: 'remote',
-  filenameTemplate: '{title}',
-  mdBullet: '-',
-  mdEmphasis: '*',
-  mdFence: '```',
-  mdLinkStyle: 'inlined',
-  complexTable: 'auto',
-  highlightAnchors: true,
-  keepHistory: true,
-  customRules: [],
-};
+// 默认值与存储读写的唯一实现在 core/settings.js（本页 html 已引入）
+const DEFAULTS = InkSettings.DEFAULTS;
+const readSettings = () => InkSettings.read();
+const writeSettings = (s) => InkSettings.write(s);
 
 const $ = (id) => document.getElementById(id);
-
-/**
- * 存储策略「本地为主、同步尽力」：sync 单项限 8KB，规则多了会超限。
- * 写：local 必成 + sync 尽力；读：local 优先，空则读 sync（新设备场景）。
- */
-async function readSettings() {
-  const local = await chrome.storage.local.get('inkmarkSettings');
-  if (local.inkmarkSettings) return local.inkmarkSettings;
-  const sync = await chrome.storage.sync.get('inkmarkSettings');
-  return sync.inkmarkSettings || {};
-}
-
-async function writeSettings(settings) {
-  await chrome.storage.local.set({ inkmarkSettings: settings });
-  try {
-    await chrome.storage.sync.set({ inkmarkSettings: settings });
-  } catch (e) { /* 超出 sync 配额：本地已保存，跨设备同步降级 */ }
-}
 
 document.addEventListener('DOMContentLoaded', async () => {
   bindTabs();
@@ -72,8 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('import-file').addEventListener('change', importConfig);
   $('btn-reset-cfg').addEventListener('click', async () => {
     if (!confirm('确定恢复全部默认设置？自定义站点规则也会被清除（导出历史不受影响）。')) return;
-    await chrome.storage.local.remove('inkmarkSettings');
-    try { await chrome.storage.sync.remove('inkmarkSettings'); } catch (e) { /* 忽略 */ }
+    await InkSettings.reset();
     location.reload();
   });
 

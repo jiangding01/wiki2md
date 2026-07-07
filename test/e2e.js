@@ -19,6 +19,7 @@ const CONTENT_FILES = [
   'src/lib/turndown.js',
   'src/lib/turndown-plugin-gfm.js',
   'src/lib/jszip.min.js',
+  'src/core/settings.js',
   'src/core/ir.js',
   'src/core/markdown.js',
   'src/adapters/registry.js',

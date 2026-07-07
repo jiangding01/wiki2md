@@ -32,7 +32,7 @@
 
 | 事项 | 说明 |
 | --- | --- |
-| 设置读写收敛为 core/settings.js | 「local 优先、sync 尽力」目前在 pipeline/options/popup 三处各有实现，DEFAULTS 三份维护，已出现键集漂移 |
+| ~~设置读写收敛为 core/settings.js~~ | ✅ 已完成：InkSettings 单一实现（DEFAULTS/read/write/update/reset），pipeline/popup/options/background 四处统一接入 |
 | 适配器提取样板下沉 | 六个选择器型适配器重复同一套 detach→fixLazy→removeNoise→absolutize 序列与标题兜底，应抽 InkIR 组合层 |
 | 界面页共享工具 | escapeHtml、下载 blob 样板、设计 token CSS 在 4 个界面页各有副本，已有变量漂移 |
 | 页面树导出并行化 | BFS 抓页与逐页图片本地化目前串行，大空间导出耗时被 RTT 主导 |

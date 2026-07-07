@@ -2,6 +2,13 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。日志格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [未发布]
+
+### 内部重构
+
+- 设置存储收敛为 `core/settings.js` 单一实现（InkSettings：DEFAULTS / read / write / update / reset），
+  替换 pipeline / popup / options / background 四处重复代码与三份默认值表——行为无变化
+
 ## [1.0.0] - 2026-07-07
 
 摘墨 Inkmark 首个正式版。由原 wiki2md（仅支持 Confluence 单页导出，归档于 `legacy-v1` 分支）
