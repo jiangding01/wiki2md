@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>摘墨</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app">
+
+    <!-- 页眉：印章 logo + 品牌 + 适配器徽章 -->
+    <header class="header">
+      <div class="brand">
+        <div class="seal" aria-hidden="true">摘</div>
+        <div class="brand-text">
+          <h1>摘墨</h1>
+          <span class="brand-sub">Inkmark · 网页转 Markdown</span>
+        </div>
+      </div>
+      <button id="btn-settings" class="icon-btn" title="设置">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm7.4-2.5c.04-.33.07-.66.07-1s-.03-.67-.07-1l2.1-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.3 7.3 0 0 0-1.73-1l-.38-2.65A.5.5 0 0 0 13.93 2h-4a.5.5 0 0 0-.5.42l-.37 2.65c-.63.26-1.2.6-1.74 1l-2.48-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64L4.55 11c-.05.33-.08.66-.08 1s.03.67.08 1l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.13.22.39.31.61.22l2.48-1c.55.42 1.12.76 1.74 1l.37 2.65c.05.24.25.42.5.42h4a.5.5 0 0 0 .5-.42l.37-2.65a7.3 7.3 0 0 0 1.73-1l2.49 1c.22.09.48 0 .6-.22l2-3.46a.5.5 0 0 0-.12-.64L19.4 13z"/></svg>
+      </button>
+    </header>
+
+    <!-- 状态区：加载 / 错误 / 内容 -->
+    <section id="state-loading" class="state">
+      <div class="ink-spinner"><span></span><span></span><span></span></div>
+      <p>正在研墨，分析页面…</p>
+    </section>
+
+    <section id="state-error" class="state hidden">
+      <p class="error-icon">😵‍💫</p>
+      <p id="error-message">页面分析失败</p>
+      <p class="error-hint">系统页面（chrome:// 等）无法导出</p>
+    </section>
+
+    <section id="state-ready" class="hidden">
+
+      <!-- 文档卡片 -->
+      <div class="doc-card">
+        <div class="doc-head">
+          <span id="adapter-badge" class="badge">通用模式</span>
+          <span id="doc-site" class="doc-site"></span>
+        </div>
+        <input id="doc-title" class="doc-title" spellcheck="false"
+               placeholder="文档标题（可编辑，即文件名）">
+        <div class="stats">
+          <span class="stat"><b id="stat-words">0</b> 字</span>
+          <span class="stat"><b id="stat-images">0</b> 图</span>
+          <span class="stat"><b id="stat-tables">0</b> 表格</span>
+          <span class="stat"><b id="stat-code">0</b> 代码块</span>
+          <span class="stat stat-comments hidden" id="stat-comments-wrap"><b id="stat-comments">0</b> 评论</span>
+        </div>
+        <div id="warnings" class="warnings hidden"></div>
+      </div>
+
+      <!-- 导出选项 -->
+      <div class="options">
+        <label class="opt-row">
+          <span class="opt-label">YAML Front Matter</span>
+          <span class="toggle"><input type="checkbox" id="opt-frontmatter" checked><i></i></span>
+        </label>
+        <label class="opt-row" id="opt-comments-row">
+          <span class="opt-label">导出评论 <em class="opt-hint">划线转脚注 · 其余附文末</em></span>
+          <span class="toggle"><input type="checkbox" id="opt-comments" checked><i></i></span>
+        </label>
+        <div class="opt-row">
+          <span class="opt-label">图片</span>
+          <div class="segmented" role="radiogroup">
+            <button class="seg-btn active" data-value="remote" title="保留原始图片链接">远程链接</button>
+            <button class="seg-btn" data-value="zip" title="下载图片并打包为 ZIP">本地打包</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 动作区 -->
+      <div class="actions">
+        <button id="btn-download" class="btn-primary">
+          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 16l-5-5h3V4h4v7h3l-5 5zm-7 2h14v2H5v-2z"/></svg>
+          <span id="btn-download-label">下载 Markdown</span>
+        </button>
+        <div class="actions-secondary">
+          <button id="btn-copy" class="btn-ghost" title="复制 Markdown 到剪贴板">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
+            复制
+          </button>
+          <button id="btn-preview" class="btn-ghost" title="在新标签页中预览">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 4.5C7 4.5 2.7 7.6 1 12c1.7 4.4 6 7.5 11 7.5s9.3-3.1 11-7.5c-1.7-4.4-6-7.5-11-7.5zm0 12.5a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+            预览
+          </button>
+        </div>
+      </div>
+
+      <p id="status-line" class="status-line" role="status"></p>
+    </section>
+
+    <footer class="footer">
+      <span class="footer-tip">右键选中文字可导出节选 · <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> 一键下载</span>
+    </footer>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

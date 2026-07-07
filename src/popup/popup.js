@@ -1,0 +1,233 @@
+/**
+ * 摘墨 · Popup 控制器
+ * 打开即分析当前页 → 展示适配器/统计 → 按用户选项驱动导出。
+ */
+
+const $ = (id) => document.getElementById(id);
+
+const state = {
+  tabId: null,
+  imageStrategy: 'remote',
+  settings: {},
+  analyzing: false,
+};
+
+const IS_EXTENSION = typeof chrome !== 'undefined' && !!(chrome.tabs && chrome.runtime && chrome.runtime.id);
+
+/* ---------- 初始化 ---------- */
+
+document.addEventListener('DOMContentLoaded', async () => {
+  bindEvents();
+  if (!IS_EXTENSION) return demoMode(); // 独立打开 html 时展示设计稿数据
+
+  state.settings = await loadSettings();
+  applySettingsToUI();
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.id || /^(chrome|edge|about|chrome-extension):/.test(tab.url || '')) {
+    return showError('无法在此页面使用', '系统页面（chrome:// 等）无法导出');
+  }
+  state.tabId = tab.id;
+
+  try {
+    const inject = await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: tab.id });
+    if (!inject || !inject.ok) throw new Error((inject && inject.error) || '脚本注入失败');
+    await analyze();
+  } catch (e) {
+    showError('页面分析失败', e.message);
+  }
+});
+
+async function analyze() {
+  state.analyzing = true;
+  const res = await chrome.tabs.sendMessage(state.tabId, {
+    type: 'INK_ANALYZE',
+    options: { includeComments: $('opt-comments').checked },
+  });
+  state.analyzing = false;
+  if (!res || !res.ok) {
+    return showError('页面分析失败', (res && res.error) || '内容脚本无响应');
+  }
+  renderAnalysis(res);
+}
+
+/* ---------- 渲染 ---------- */
+
+function renderAnalysis(res) {
+  $('state-loading').classList.add('hidden');
+  $('state-error').classList.add('hidden');
+  $('state-ready').classList.remove('hidden');
+
+  const badge = $('adapter-badge');
+  badge.textContent = res.adapter.name + (res.adapter.badge === 'experimental' ? ' · 实验性' : '');
+  badge.className = 'badge ' + res.adapter.badge;
+
+  // 站点名与适配器名相同则不重复展示
+  $('doc-site').textContent = (res.siteName && res.siteName !== res.adapter.name) ? res.siteName : '';
+
+  $('doc-title').value = res.title || '';
+  $('stat-words').textContent = formatNum(res.stats.words);
+  $('stat-images').textContent = res.stats.images;
+  $('stat-tables').textContent = res.stats.tables;
+  $('stat-code').textContent = res.stats.codeBlocks;
+
+  if (res.stats.comments > 0) {
+    $('stat-comments-wrap').classList.remove('hidden');
+    $('stat-comments').textContent = res.stats.comments;
+  } else {
+    $('stat-comments-wrap').classList.add('hidden');
+  }
+
+  const w = $('warnings');
+  if (res.warnings && res.warnings.length) {
+    w.classList.remove('hidden');
+    w.textContent = res.warnings.join(' ');
+  } else {
+    w.classList.add('hidden');
+  }
+}
+
+function showError(msg, hint) {
+  $('state-loading').classList.add('hidden');
+  $('state-ready').classList.add('hidden');
+  $('state-error').classList.remove('hidden');
+  $('error-message').textContent = msg;
+  if (hint) document.querySelector('.error-hint').textContent = hint;
+}
+
+function formatNum(n) {
+  return n >= 10000 ? (n / 10000).toFixed(1) + 'w' : String(n);
+}
+
+function status(msg, isError) {
+  const el = $('status-line');
+  el.textContent = msg;
+  el.classList.toggle('err', !!isError);
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
+}
+
+/* ---------- 导出动作 ---------- */
+
+function exportOptions() {
+  return Object.assign({}, state.settings, {
+    frontMatter: $('opt-frontmatter').checked,
+    includeComments: $('opt-comments').checked,
+    title: $('doc-title').value,
+  });
+}
+
+async function doDownload() {
+  const btn = $('btn-download');
+  btn.disabled = true;
+  try {
+    if (state.imageStrategy === 'zip') {
+      $('btn-download-label').textContent = '抓取图片中…';
+      const res = await chrome.tabs.sendMessage(state.tabId, {
+        type: 'INK_EXPORT', action: 'zip', options: exportOptions(),
+      });
+      if (!res.ok) throw new Error(res.error);
+      status(`已打包 ${res.imageCount} 张图片` + (res.failedCount ? `（${res.failedCount} 张失败，保留远程链接）` : ''));
+    } else {
+      const res = await chrome.tabs.sendMessage(state.tabId, {
+        type: 'INK_EXPORT', action: 'download', options: exportOptions(),
+      });
+      if (!res.ok) throw new Error(res.error);
+      status('已下载 ' + res.filename);
+    }
+  } catch (e) {
+    status('导出失败：' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    $('btn-download-label').textContent = state.imageStrategy === 'zip' ? '下载 ZIP（含图片）' : '下载 Markdown';
+  }
+}
+
+async function doCopy() {
+  try {
+    const res = await chrome.tabs.sendMessage(state.tabId, {
+      type: 'INK_EXPORT', action: 'markdown', options: exportOptions(),
+    });
+    if (!res.ok) throw new Error(res.error);
+    await navigator.clipboard.writeText(res.markdown);
+    status('已复制到剪贴板');
+  } catch (e) {
+    status('复制失败：' + e.message, true);
+  }
+}
+
+async function doPreview() {
+  try {
+    const res = await chrome.tabs.sendMessage(state.tabId, {
+      type: 'INK_EXPORT', action: 'markdown', options: exportOptions(),
+    });
+    if (!res.ok) throw new Error(res.error);
+    await chrome.storage.local.set({
+      inkmarkPreview: { markdown: res.markdown, title: res.title, filename: res.filename, ts: Date.now() },
+    });
+    await chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/preview.html') });
+    window.close();
+  } catch (e) {
+    status('预览失败：' + e.message, true);
+  }
+}
+
+/* ---------- 事件 ---------- */
+
+function bindEvents() {
+  $('btn-download').addEventListener('click', doDownload);
+  $('btn-copy').addEventListener('click', doCopy);
+  $('btn-preview').addEventListener('click', doPreview);
+  $('btn-settings').addEventListener('click', () => {
+    if (IS_EXTENSION) chrome.runtime.openOptionsPage();
+  });
+
+  document.querySelectorAll('.seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.imageStrategy = btn.dataset.value;
+      $('btn-download-label').textContent =
+        state.imageStrategy === 'zip' ? '下载 ZIP（含图片）' : '下载 Markdown';
+    });
+  });
+
+  // 切换「导出评论」需要重新分析（评论是异步拉取的）
+  $('opt-comments').addEventListener('change', () => {
+    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze();
+  });
+}
+
+/* ---------- 设置 ---------- */
+
+async function loadSettings() {
+  const defaults = {
+    frontMatter: true, includeComments: true, commentStyle: 'both',
+    imageStrategy: 'remote', filenameTemplate: '{title}', includeTitle: true,
+  };
+  const stored = await chrome.storage.sync.get('inkmarkSettings');
+  return Object.assign(defaults, stored.inkmarkSettings || {});
+}
+
+function applySettingsToUI() {
+  $('opt-frontmatter').checked = !!state.settings.frontMatter;
+  $('opt-comments').checked = !!state.settings.includeComments;
+  state.imageStrategy = state.settings.imageStrategy || 'remote';
+  document.querySelectorAll('.seg-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.value === state.imageStrategy);
+  });
+  $('btn-download-label').textContent =
+    state.imageStrategy === 'zip' ? '下载 ZIP（含图片）' : '下载 Markdown';
+}
+
+/* ---------- 设计稿演示模式（file:// 直接打开时） ---------- */
+
+function demoMode() {
+  renderAnalysis({
+    ok: true,
+    adapter: { id: 'confluence', name: 'Confluence', badge: 'precise' },
+    title: '支付网关重构 · 技术方案评审',
+    siteName: 'Confluence',
+    stats: { words: 4260, images: 12, tables: 3, codeBlocks: 8, comments: 17 },
+    warnings: [],
+  });
+}

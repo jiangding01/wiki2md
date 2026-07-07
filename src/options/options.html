@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>摘墨 · 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div class="seal">摘</div>
+      <div>
+        <h1>摘墨 · 默认设置</h1>
+        <p class="sub">这里的选择会成为 popup、右键菜单与快捷键导出的默认行为</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>导出内容</h2>
+      <label class="row">
+        <div>
+          <span class="label">YAML Front Matter</span>
+          <span class="hint">在文件头部写入标题、来源、作者、摘录时间等元数据（Obsidian 友好）</span>
+        </div>
+        <span class="toggle"><input type="checkbox" id="frontMatter"><i></i></span>
+      </label>
+      <label class="row">
+        <div>
+          <span class="label">文档标题作为一级标题</span>
+          <span class="hint">在正文开头插入 <code># 标题</code></span>
+        </div>
+        <span class="toggle"><input type="checkbox" id="includeTitle"><i></i></span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>评论</h2>
+      <label class="row">
+        <div>
+          <span class="label">导出评论</span>
+          <span class="hint">支持平台：Confluence（页面评论 + 划线评论）；更多平台适配中</span>
+        </div>
+        <span class="toggle"><input type="checkbox" id="includeComments"><i></i></span>
+      </label>
+      <div class="row">
+        <div>
+          <span class="label">评论呈现方式</span>
+          <span class="hint">脚注：划线评论锚定在原文位置；附录：统一放在文末「💬 评论」区</span>
+        </div>
+        <select id="commentStyle" class="select">
+          <option value="both">划线转脚注 + 其余进附录（推荐）</option>
+          <option value="footnote">仅脚注（无锚点的进附录）</option>
+          <option value="appendix">全部进附录</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>图片与文件</h2>
+      <div class="row">
+        <div>
+          <span class="label">图片默认策略</span>
+          <span class="hint">本地打包：抓取图片存入 assets/ 并压缩为 ZIP（需要登录态的图片也能带走）</span>
+        </div>
+        <select id="imageStrategy" class="select">
+          <option value="remote">保留远程链接</option>
+          <option value="zip">本地打包（ZIP）</option>
+        </select>
+      </div>
+      <div class="row">
+        <div>
+          <span class="label">文件名模板</span>
+          <span class="hint">可用变量：<code>{title}</code> 标题 · <code>{domain}</code> 域名 · <code>{date}</code> 日期</span>
+        </div>
+        <input type="text" id="filenameTemplate" class="input" placeholder="{title}">
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span id="save-status" class="save-status"></span>
+      <button id="btn-save" class="btn-primary">保存设置</button>
+    </footer>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

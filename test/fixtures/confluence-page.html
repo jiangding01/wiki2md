@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>支付网关重构方案 - 架构组 - Confluence</title>
+  <meta name="ajs-page-id" content="128450">
+  <meta name="ajs-base-url" content="https://wiki.example.com">
+</head>
+<body id="com-atlassian-confluence">
+  <div id="header">导航栏（应被忽略）</div>
+  <h1 id="title-text">支付网关重构方案</h1>
+  <div class="page-metadata">由 <a class="author" href="#">林晚秋</a> 创建于 2026-07-01</div>
+  <div id="main-content" class="wiki-content">
+    <p>本方案评审新一代支付网关的技术选型，涉及 <strong>12 条业务线</strong>。</p>
+
+    <div class="confluence-information-macro confluence-information-macro-warning">
+      <span class="aui-icon icon"></span>
+      <div class="title">资金安全</div>
+      <div class="confluence-information-macro-body">
+        <p>涉及资金链路的改动必须双人评审并灰度发布。</p>
+      </div>
+    </div>
+
+    <h2>核心路由</h2>
+    <div class="code panel">
+      <div class="codeContent panelContent">
+        <pre class="syntaxhighlighter-pre" data-syntaxhighlighter-params="brush: java; gutter: false">public Route resolve(PaymentRequest req) {
+    return routeTable.match(req.getBizLine(), req.getChannel())
+                     .orElseThrow(RouteMissException::new);
+}</pre>
+      </div>
+    </div>
+
+    <h2>容量评估</h2>
+    <table class="confluenceTable">
+      <tbody>
+        <tr><th class="confluenceTh">指标</th><th class="confluenceTh">当前</th><th class="confluenceTh">目标</th></tr>
+        <tr><td class="confluenceTd">QPS</td><td class="confluenceTd">31k</td><td class="confluenceTd">85k</td></tr>
+        <tr><td class="confluenceTd">P99 延迟</td><td class="confluenceTd">45ms</td><td class="confluenceTd">12ms</td></tr>
+      </tbody>
+    </table>
+
+    <p><img class="confluence-embedded-image" src="/wiki/download/thumbnails/128450/arch.png" alt="架构图"></p>
+  </div>
+  <div id="footer">页脚（应被忽略）</div>
+</body>
+</html>
