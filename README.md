@@ -56,17 +56,25 @@
 适配器层（每站点一个，Generic 兜底） → 中间表示 IR → 唯一的 Markdown 转换器 → 输出层
 ```
 
-完整设计文档见 [docs/DESIGN.md](docs/DESIGN.md)，包括各平台适配策略、评论导出设计、视觉规范与路线图。
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [CHANGELOG.md](CHANGELOG.md) | 版本更新日志 |
+| [ROADMAP.md](ROADMAP.md) | 路线图（近期/中期/远期） |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 开发指南：零构建、测试、适配器开发 SOP |
+| [PRIVACY.md](PRIVACY.md) | 隐私说明与权限用途 |
+| [docs/DESIGN.md](docs/DESIGN.md) | 完整设计文档：架构决策、各平台适配策略、历次迭代记录 |
 
 ## 开发与测试
 
 ```bash
 npm install playwright          # 测试依赖（仅本地）
-node test/e2e.js                # 真实 Chromium 中跑全管线断言
+node test/e2e.js                # 真实 Chromium 中跑全管线断言（80 项）
 # 使用系统已有浏览器：CHROMIUM_PATH=/path/to/chrome node test/e2e.js
 ```
 
-平台改版导致适配器失效时：把新版页面 HTML 存入 `test/fixtures/`，修对应适配器的选择器，测试转绿即修复。
+平台改版导致适配器失效时：把新版页面 HTML 存入 `test/fixtures/`，修对应适配器的选择器，测试转绿即修复。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 第三方库
 
