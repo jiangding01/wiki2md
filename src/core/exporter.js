@@ -102,11 +102,20 @@ var InkExporter = window.InkExporter || {
     let out = markdown;
     for (const [url, path] of rename) {
       for (const token of jobs.get(url)) {
-        const replacement = token.startsWith('](') ? `](${path})` : `src="${path}"`;
+        // Markdown 链接目标里的空格/括号会破坏解析（页面名可能包含它们），
+        // 引用写转义形式；zip 内的实际文件路径保持原样
+        const replacement = token.startsWith('](')
+          ? `](${this._mdPathEscape(path)})`
+          : `src="${path}"`;
         out = out.split(token).join(replacement);
       }
     }
     return { markdown: out, files, failed };
+  },
+
+  /** CommonMark 链接目标转义：仅处理会破坏解析的字符，保持 CJK 可读 */
+  _mdPathEscape(path) {
+    return path.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
   },
 
   /**

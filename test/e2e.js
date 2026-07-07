@@ -377,9 +377,9 @@ async function runPipeline(page, fixture, options) {
       '失败页面进入 ZIP 内导出报告，不静默丢失', tree.report);
     assert(tree.filename.includes('页面树') && tree.filename.endsWith('.zip'), 'ZIP 文件名含标识');
     assert(tree.res.images === 1 &&
-           tree.files.includes('支付网关重构方案/子页面A/孙页面B.assets/img-001.png'),
-      '子页面图片本地化进「页面名.assets/」目录', tree.files.join(', '));
-    assert(tree.bContent.includes('](孙页面B.assets/img-001.png)'),
+           tree.files.includes('支付网关重构方案/子页面A/assets/孙页面B/img-001.png'),
+      '子页面图片进「assets/<页面名>/」分组目录（每层仅一个 assets）', tree.files.join(', '));
+    assert(tree.bContent.includes('](assets/孙页面B/img-001.png)'),
       'md 内图片改为相对引用，解压即可离线查看', tree.bContent);
   }
 
@@ -414,6 +414,18 @@ async function runPipeline(page, fixture, options) {
     assert(img.fetched.includes('https://w.example.com/b.png?ver=1&mod=2'),
       'HTML 属性 &amp; 解码后抓取', img.fetched.join(', '));
     assert(img.files.length === 2, '两张图片均落入 assets/');
+
+    // 资产目录名含空格/括号时，md 引用必须转义（CommonMark 链接目标规则）
+    const esc = await page.evaluate(async () => {
+      window.fetch = () => Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['x'], { type: 'image/png' })) });
+      const res = await InkExporter.localizeImages(
+        '![a](https://w.example.com/c.png)', null, 'assets/我的 页面(1)');
+      return { md: res.markdown, file: Array.from(res.files.keys())[0] };
+    });
+    assert(esc.md.includes('](assets/我的%20页面%281%29/img-001.png)'),
+      'md 引用中的空格/括号已转义', esc.md);
+    assert(esc.file === 'assets/我的 页面(1)/img-001.png',
+      'zip 内实际文件路径保持原样', esc.file);
   }
 
   /* ---------- 用例 15：重复注入无害（真实用户报错场景） ---------- */

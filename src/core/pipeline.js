@@ -222,11 +222,13 @@
 
       let md = InkMarkdown.render(n.ir, renderOpts);
       // 页面树的使用场景就是 Confluence——图片全部需要登录态，
-      // 远程链接在本地必然裂图，所以每一页都做图片本地化：
-      // 图片放进与 md 同级的「<文件名>.assets/」目录，相对引用，解压即可离线阅读。
+      // 远程链接在本地必然裂图，所以每一页都做图片本地化。
+      // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
+      // 目录列表不被「每篇 md 一个长名文件夹」翻倍，配对关系仍一眼可见，
+      // 单独移动某篇 md 时带走 assets/<同名>/ 即可。
       const fileBase = full.slice(full.lastIndexOf('/') + 1, -3);
       progress(`图片本地化 ${i + 1}/${nodes.length}：${n.title}`);
-      const localized = await InkExporter.localizeImages(md, null, `${fileBase}.assets`);
+      const localized = await InkExporter.localizeImages(md, null, `assets/${fileBase}`);
       md = localized.markdown;
       imageCount += localized.files.size;
       imageFailed += localized.failed.length;
