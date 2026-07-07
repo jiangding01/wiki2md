@@ -386,7 +386,8 @@ var InkMarkdown = window.InkMarkdown || {
     }
 
     if (footnotes.length) {
-      markdown += '\n\n' + footnotes.join('\n');
+      // 脚注定义之间空一行：多行脚注（缩进续行）后紧贴下一条定义，部分渲染器会解析粘连
+      markdown += '\n\n' + footnotes.join('\n\n');
     }
     return { markdown, orphans };
   },
@@ -405,15 +406,18 @@ var InkMarkdown = window.InkMarkdown || {
     return -1;
   },
 
+  /** 脚注体：首行评论，回复逐行缩进（4 空格续行是多行脚注语法，Obsidian/Typora/GFM 通用）。
+   *  此前回复用「↳」串在同一行，长回复链完全没有层级可读性。 */
   _formatAnnotationBody(ann) {
     const meta = [ann.author, ann.time].filter(Boolean).join(' · ');
     let body = ann.content.replace(/\n+/g, ' ').trim();
     if (meta) body = `**${meta}**：${body}`;
+    const lines = [body];
     for (const r of ann.replies) {
       const rMeta = [r.author, r.time].filter(Boolean).join(' · ');
-      body += ` ↳ ${rMeta ? `**${rMeta}**：` : ''}${r.content.replace(/\n+/g, ' ').trim()}`;
+      lines.push(`↳ ${rMeta ? `**${rMeta}**：` : ''}${r.content.replace(/\n+/g, ' ').trim()}`);
     }
-    return body;
+    return lines.join('\n    ');
   },
 
   /** 页面评论 + 无锚点的划线评论 → 文末评论区 */

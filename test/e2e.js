@@ -109,6 +109,10 @@ async function runPipeline(page, fixture, options) {
           InkIR.annotation({
             kind: 'inline', anchorText: '支付网关', author: '陈默',
             time: '2026-07-05', content: '这里建议写成「统一收单网关」',
+            replies: [
+              InkIR.annotation({ author: '苏澄', time: '2026-07-06', content: '同意，已修改' }),
+              InkIR.annotation({ author: '陈默', content: '收到' }),
+            ],
           }),
           InkIR.annotation({
             kind: 'page', author: '赵砚', time: '2026-07-06',
@@ -126,6 +130,9 @@ async function runPipeline(page, fixture, options) {
     assert(md.withHighlight.includes('==支付网关==[^1]'), '划线原文高亮 + 脚注（默认）');
     assert(md.noHighlight.includes('支付网关[^1]') && !md.noHighlight.includes('=='), '关闭高亮：仅脚注');
     assert(md.withHighlight.includes('[^1]: **陈默 · 2026-07-05**：这里建议写成'), '脚注内容完整');
+    assert(/\[\^1\]: [^\n]+\n {4}↳ \*\*苏澄 · 2026-07-06\*\*：同意，已修改\n {4}↳ \*\*陈默\*\*：收到/.test(md.withHighlight),
+      '脚注内回复逐行缩进展示层级（多行脚注续行语法），不再挤在一行',
+      md.withHighlight.split('[^1]:')[1]);
     assert(md.withHighlight.includes('## 💬 评论'), '页面评论进附录');
     assert(md.withHighlight.includes('> > **林晚秋**'), '评论回复嵌套引用');
     assert(md.fmTags.includes('tags: [工作, wiki]'),
