@@ -67,6 +67,8 @@ var ZhihuAdapter = window.ZhihuAdapter || {
       if (tex) {
         const span = document.createElement('span');
         span.setAttribute('data-ink-math', tex);
+        // 必须有文本内容：空 inline 元素会命中 Turndown 的 blank 规则被整个吞掉
+        span.textContent = tex;
         img.replaceWith(span);
       }
     });

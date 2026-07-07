@@ -150,7 +150,7 @@ async function renderHistory() {
     return;
   }
 
-  const ACTION_LABEL = { download: '下载', zip: 'ZIP', copy: '复制', selection: '节选' };
+  const ACTION_LABEL = { download: '下载', zip: 'ZIP', copy: '复制', selection: '节选', batch: '批量' };
   for (const entry of inkmarkHistory) {
     const item = document.createElement('div');
     item.className = 'history-item';

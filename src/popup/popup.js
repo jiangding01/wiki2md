@@ -11,6 +11,7 @@ const state = {
   settings: {},
   analyzing: false,
   busy: false, // 任一导出进行中：全部动作与选项互斥
+  autoSwitchedZip: false, // 鉴权站点自动切 zip 只做一次，用户手动切回后不再强制
 };
 
 /**
@@ -56,6 +57,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         el.textContent = msg.text;
         el.classList.remove('err');
       }
+    }
+    // 页面侧忙态广播：popup 关闭重开后据此恢复/解除互斥（导出在页面内继续跑）
+    if (msg && msg.type === 'INK_BUSY') {
+      setBusy(msg.busy);
+      if (!msg.busy) status('导出完成');
     }
   });
 
@@ -175,7 +181,9 @@ function renderAnalysis(res) {
     notes.push('本页正文几乎为空——可能是目录/容器页。' +
       (res.adapter.id === 'confluence' ? '可直接用「导出页面树」打包全部子页面。' : ''));
   }
-  if (res.adapter.authImages && state.imageStrategy === 'remote') {
+  // 只自动切一次——用户手动切回「远程链接」后，重新分析不再强制覆盖
+  if (res.adapter.authImages && state.imageStrategy === 'remote' && !state.autoSwitchedZip) {
+    state.autoSwitchedZip = true;
     state.imageStrategy = 'zip';
     document.querySelectorAll('.seg-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.value === 'zip');

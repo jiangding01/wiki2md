@@ -57,9 +57,12 @@ var InkMarkdown = window.InkMarkdown || {
         const codeEl = node.querySelector('code');
         let text = (codeEl || node).textContent || '';
         text = text.replace(/\n$/, '');
-        // 尊重用户的围栏偏好；正文里已含围栏字符时自动加长
-        const base = s.mdFence || '```';
-        const fence = text.includes(base) ? base + base[0] : base;
+        // 尊重用户的围栏偏好；围栏必须比正文中最长的同字符连串更长，
+        // 否则内容里 4+ 个反引号会提前闭合代码块
+        const marker = (s.mdFence || '```')[0];
+        const runs = text.match(new RegExp(`[${marker}]{3,}`, 'g'));
+        const maxRun = runs ? Math.max(...runs.map(r => r.length)) : 0;
+        const fence = marker.repeat(Math.max(3, maxRun + 1));
         return `\n\n${fence}${lang}\n${text}\n${fence}\n\n`;
       },
     });
@@ -136,12 +139,16 @@ var InkMarkdown = window.InkMarkdown || {
     td.addRule('mediaPlaceholder', {
       filter: ['iframe', 'video', 'audio', 'embed'],
       replacement: (content, node) => {
-        let src = node.getAttribute('src') || '';
+        let src = node.getAttribute('src') || node.getAttribute('data-src') || '';
         if (!src && node.querySelector) {
           const source = node.querySelector('source[src]');
           if (source) src = source.getAttribute('src');
         }
-        if (!src || src.startsWith('blob:')) return '';
+        if (src.startsWith('blob:')) {
+          // blob 流无法外链，但也不能无声消失
+          return '\n\n*[▶️ 媒体内容：blob 流，无法导出外链，请在原页面查看]*\n\n';
+        }
+        if (!src) return '';
         let abs = src;
         if (abs.startsWith('//')) abs = 'https:' + abs; // 协议相对地址统一按 https
         try { abs = new URL(abs, location.href).href; } catch (e) { /* 保留原值 */ }
@@ -457,7 +464,8 @@ var InkMarkdown = window.InkMarkdown || {
       this.prepareTables(workEl, opts);
     }
     const td = this.createTurndown(opts);
-    let body = td.turndown(workEl ? workEl.innerHTML : '');
+    // 直接传 DOM 节点：innerHTML 序列化 + Turndown 内部再解析是两份多余的全量拷贝
+    let body = td.turndown(workEl || '');
     // 清理不可见字符（零宽空格/BOM/方向控制符）与 nbsp，收敛多余空行
     body = body
       .replace(/[\u200b\u200c\u200d\u200e\u200f\ufeff]/g, '')
@@ -481,7 +489,7 @@ var InkMarkdown = window.InkMarkdown || {
     }
 
     const pieces = [];
-    if (opts.frontMatter) pieces.push(this.buildFrontMatter(ir));
+    if (opts.frontMatter) pieces.push(this.buildFrontMatter(ir, opts));
     if (opts.includeTitle) pieces.push(`# ${ir.title}`);
     pieces.push(body);
     if (appendixAnns.length) {

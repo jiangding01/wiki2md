@@ -174,6 +174,11 @@ body {
   color: var(--amber-ink);
   border-color: var(--amber-line);
 }
+.badge.custom {
+  background: rgba(30, 142, 90, 0.1);
+  color: var(--jade);
+  border-color: transparent;
+}
 
 .doc-site { font-size: 11px; color: var(--ink-faint); }
 

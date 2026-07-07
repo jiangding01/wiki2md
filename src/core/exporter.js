@@ -7,7 +7,20 @@
 // 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
 var InkExporter = window.InkExporter || {
 
-  /** 文件名净化 + 模板渲染。模板变量：{title} {domain} {date} */
+  /**
+   * 文件/目录名净化的唯一实现（单页文件名与页面树目录名共用，规则永不漂移）。
+   * & # % 在各类 md 渲染器的链接目标里是惯犯（实体化/锚点/百分号编码），
+   * 换成全角等价字符——视觉无差别，对所有解析器都是普通文字。
+   */
+  sanitizeName(s, maxLen) {
+    return String(s || 'untitled')
+      .replace(/[\\/:*?"<>|\n\r]+/g, '_')
+      .replace(/\s+/g, ' ')
+      .replace(/[&#%]/g, c => ({ '&': '＆', '#': '＃', '%': '％' }[c]))
+      .trim().slice(0, maxLen || 120) || 'untitled';
+  },
+
+  /** 文件名模板渲染。模板变量：{title} {domain} {date} */
   buildFilename(template, ir, ext) {
     const date = new Date();
     const pad = n => String(n).padStart(2, '0');
@@ -16,12 +29,8 @@ var InkExporter = window.InkExporter || {
       domain: (() => { try { return new URL(ir.url).hostname; } catch (e) { return 'web'; } })(),
       date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
     };
-    let name = (template || '{title}').replace(/\{(title|domain|date)\}/g, (_, k) => vars[k]);
-    name = name.replace(/[\\/:*?"<>|\n\r]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
-    // & # % 在各类 md 渲染器的链接目标里是惯犯（实体化/锚点/百分号编码），
-    // 文件名里换成全角等价字符——视觉无差别，对所有解析器都是普通文字
-    name = name.replace(/[&#%]/g, c => ({ '&': '＆', '#': '＃', '%': '％' }[c]));
-    return `${name || 'untitled'}.${ext}`;
+    const name = (template || '{title}').replace(/\{(title|domain|date)\}/g, (_, k) => vars[k]);
+    return `${this.sanitizeName(name, 120)}.${ext}`;
   },
 
   /** 页面内触发下载（无需 downloads 权限） */
@@ -45,26 +54,19 @@ var InkExporter = window.InkExporter || {
    * 并发 4 路，单张 20s 超时；data: URI 同样落盘（fetch 原生支持）。
    * 返回 { markdown, files: Map<path, Blob>, failed: string[] }
    */
+  // Markdown 形式 ![alt](url) 或 ![alt](url "title")；HTML 块中的 <img src="...">
+  // （复杂表格直通会产生后者；HTML 属性里的 &amp; 需解码后抓取）
+  _mdImgRe: /(!\[[^\]]*\]\()((?:https?:\/\/|data:image\/)[^)\s]+)(\s+"[^"]*")?(\))/g,
+  _htmlImgRe: /(<img[^>]*?src=")((?:https?:\/\/|data:image\/)[^"]+)(")/g,
+
   async localizeImages(markdown, onProgress, assetDir) {
-    // 收集两类图片引用：
-    //   1) Markdown 形式 ![alt](url)
-    //   2) HTML 块中的 <img src="...">（复杂表格直通会产生；Confluence 单元格里嵌图极常见）
-    // HTML 属性里的 &amp; 必须解码后再抓取，替换时用原始字面量。
-    const jobs = new Map(); // fetchUrl → Set<文中字面量 token>
-    const addJob = (fetchUrl, token) => {
-      if (!jobs.has(fetchUrl)) jobs.set(fetchUrl, new Set());
-      jobs.get(fetchUrl).add(token);
+    const urls = [];
+    const seen = new Set();
+    const collect = (fetchUrl) => {
+      if (!seen.has(fetchUrl)) { seen.add(fetchUrl); urls.push(fetchUrl); }
     };
-    let m;
-    const mdRe = /!\[[^\]]*\]\(((?:https?:\/\/|data:image\/)[^)\s]+)\)/g;
-    while ((m = mdRe.exec(markdown)) !== null) {
-      addJob(m[1], `](${m[1]})`);
-    }
-    const htmlRe = /<img[^>]*?src="((?:https?:\/\/|data:image\/)[^"]+)"/g;
-    while ((m = htmlRe.exec(markdown)) !== null) {
-      addJob(m[1].replace(/&amp;/g, '&'), `src="${m[1]}"`);
-    }
-    const urls = Array.from(jobs.keys());
+    for (const m of markdown.matchAll(this._mdImgRe)) collect(m[2]);
+    for (const m of markdown.matchAll(this._htmlImgRe)) collect(m[2].replace(/&amp;/g, '&'));
 
     const files = new Map();
     const failed = [];
@@ -102,23 +104,23 @@ var InkExporter = window.InkExporter || {
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker));
 
-    let out = markdown;
-    for (const [url, path] of rename) {
-      for (const token of jobs.get(url)) {
-        // Markdown 链接目标里的空格/括号会破坏解析（页面名可能包含它们），
-        // 引用写转义形式；zip 内的实际文件路径保持原样
-        const replacement = token.startsWith('](')
-          ? `](${this._mdPathEscape(path)})`
-          : `src="${path}"`;
-        out = out.split(token).join(replacement);
-      }
-    }
+    // 单趟替换（全文只扫两遍，与图片数量无关）。
+    // Markdown 链接目标里的空格/括号会破坏解析，引用写转义形式并保留 title；
+    // zip 内的实际文件路径保持原样。
+    let out = markdown.replace(this._mdImgRe, (all, pre, url, title, close) => {
+      const path = rename.get(url);
+      return path ? pre + this._mdPathEscape(path) + (title || '') + close : all;
+    });
+    out = out.replace(this._htmlImgRe, (all, pre, encUrl, close) => {
+      const path = rename.get(encUrl.replace(/&amp;/g, '&'));
+      return path ? pre + path + close : all;
+    });
     return { markdown: out, files, failed };
   },
 
-  /** CommonMark 链接目标转义：仅处理会破坏解析的字符，保持 CJK 可读 */
+  /** CommonMark 链接目标转义：处理会破坏解析/被误解码的字符，保持 CJK 可读。% 必须最先转义。 */
   _mdPathEscape(path) {
-    return path.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
+    return path.replace(/%/g, '%25').replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
   },
 
   /**

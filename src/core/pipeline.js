@@ -61,6 +61,30 @@
   }
   window.__inkProgress = progress; // 供适配器上报（如飞书滚动采集）
 
+  /**
+   * 导出忙态的真实来源在页面侧（popup 关闭重开后其内存互斥态会丢失，
+   * 而导出仍在页面里继续跑）。计数 + 广播，popup 据此恢复禁用状态。
+   */
+  let activeExports = 0;
+  function broadcastBusy() {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
+        chrome.runtime.sendMessage({ type: 'INK_BUSY', busy: activeExports > 0 }).catch(() => {});
+      }
+    } catch (e) { /* popup 未开启等情况 */ }
+  }
+  async function withExportBusy(fn) {
+    activeExports += 1;
+    broadcastBusy();
+    try {
+      return await fn();
+    } finally {
+      activeExports -= 1;
+      broadcastBusy();
+    }
+  }
+  window.__inkmarkExporting = () => activeExports > 0;
+
   /** 提取结果缓存：analyze 和 export 之间不重复跑适配器（飞书滚动采集很贵）。
    *  key 必须包含 URL——SPA 站点（知乎切换回答、飞书切换文档）不刷新页面，
    *  内容脚本常驻，否则第二篇文章会命中第一篇的缓存（脏读）。 */
@@ -68,8 +92,10 @@
   let inflight = { key: null, promise: null };
 
   async function getIR(settings) {
+    // key 保留 hash：hash 路由的 SPA（docsify 等 domain/#/page 形态）切文章时只有
+    // hash 变化，剥掉会脏读旧缓存；代价是点击页内锚点后首次导出会重新提取（可接受）
     const key = JSON.stringify({
-      u: location.href.split('#')[0],
+      u: location.href,
       c: settings.includeComments,
       r: settings.customRules,
     });
@@ -102,10 +128,12 @@
         return ir;
       })(),
     };
+    const mine = inflight;
     try {
       return await inflight.promise;
     } finally {
-      inflight = { key: null, promise: null };
+      // 只清理自己的记录：SPA 切换后旧请求先完成时，不能抹掉新 key 的 in-flight 记录
+      if (inflight === mine) inflight = { key: null, promise: null };
     }
   }
 
@@ -120,19 +148,24 @@
       siteName: ir.siteName,
       stats: InkIR.stats(ir),
       warnings: ir.warnings,
+      exporting: activeExports > 0, // popup 重开时据此恢复互斥忙态
     };
   }
 
   async function handleExport(action, options) {
     const settings = await loadSettings(options);
-    const ir = await getIR(settings);
-    if (settings.title && settings.title.trim()) ir.title = settings.title.trim(); // popup 里用户可改标题
+    let ir = await getIR(settings);
+    if (settings.title && settings.title.trim()) {
+      // popup 里用户可改标题——用浅拷贝覆盖，绝不改写共享缓存里的 IR
+      // （直接改会污染后续所有 analyze/export，直到页面刷新）
+      ir = Object.assign({}, ir, { title: settings.title.trim() });
+    }
     const markdown = InkMarkdown.render(ir, settings);
     const filename = InkExporter.buildFilename(settings.filenameTemplate, ir, 'md');
 
     if (action === 'markdown') {
-      if (settings.keepHistory && settings.intent === 'copy') {
-        await InkExporter.recordHistory(ir, markdown, filename, 'copy');
+      if (settings.keepHistory && (settings.intent === 'copy' || settings.intent === 'batch')) {
+        await InkExporter.recordHistory(ir, markdown, filename, settings.intent);
       }
       return { ok: true, markdown, filename, title: ir.title };
     }
@@ -170,12 +203,13 @@
     if (!rootId) return { ok: false, error: '未能识别当前页面的 pageId' };
 
     const base = adapter._baseUrl();
-    const rootIR = await getIR(settings);
-    // & # % 换全角：这些字符在部分 md 编辑器的链接目标解析里会出问题（用户实测踩坑）
-    const safe = (s) => String(s || 'untitled')
-      .replace(/[\\/:*?"<>|\n\r]+/g, '_')
-      .replace(/[&#%]/g, c => ({ '&': '＆', '#': '＃', '%': '％' }[c]))
-      .trim().slice(0, 80) || 'untitled';
+    let rootIR = await getIR(settings);
+    if (settings.title && settings.title.trim()) {
+      // 与单页导出行为一致：popup 里改过的标题作用于根页与 ZIP 文件名（浅拷贝，不污染缓存）
+      rootIR = Object.assign({}, rootIR, { title: settings.title.trim() });
+    }
+    // 文件/目录名净化统一走 InkExporter.sanitizeName（单一实现，规则不漂移）
+    const safe = (s) => InkExporter.sanitizeName(s, 80);
 
     const nodes = [{ ir: rootIR, path: [] , title: rootIR.title }];
     const queue = [{ id: rootId, path: [rootIR.title] }];
@@ -290,9 +324,9 @@
     const run = async () => {
       try {
         if (msg.type === 'INK_ANALYZE') return await handleAnalyze(msg.options);
-        if (msg.type === 'INK_EXPORT') return await handleExport(msg.action, msg.options);
-        if (msg.type === 'INK_EXPORT_SELECTION') return await handleExportSelection(msg.options);
-        if (msg.type === 'INK_EXPORT_TREE') return await handleExportTree(msg.options);
+        if (msg.type === 'INK_EXPORT') return await withExportBusy(() => handleExport(msg.action, msg.options));
+        if (msg.type === 'INK_EXPORT_SELECTION') return await withExportBusy(() => handleExportSelection(msg.options));
+        if (msg.type === 'INK_EXPORT_TREE') return await withExportBusy(() => handleExportTree(msg.options));
         return { ok: false, error: '未知消息类型' };
       } catch (e) {
         console.error('[inkmark]', e);

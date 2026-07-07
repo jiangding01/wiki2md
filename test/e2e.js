@@ -118,6 +118,7 @@ async function runPipeline(page, fixture, options) {
       return {
         withHighlight: InkMarkdown.render(ir, { frontMatter: false, includeComments: true, commentStyle: 'both' }),
         noHighlight: InkMarkdown.render(ir, { frontMatter: false, includeComments: true, commentStyle: 'both', highlightAnchors: false }),
+        fmTags: InkMarkdown.render(ir, { frontMatter: true, frontMatterTags: '工作, wiki', includeComments: false }),
       };
     });
     assert(md.withHighlight.includes('==支付网关==[^1]'), '划线原文高亮 + 脚注（默认）');
@@ -125,6 +126,8 @@ async function runPipeline(page, fixture, options) {
     assert(md.withHighlight.includes('[^1]: **陈默 · 2026-07-05**：这里建议写成'), '脚注内容完整');
     assert(md.withHighlight.includes('## 💬 评论'), '页面评论进附录');
     assert(md.withHighlight.includes('> > **林晚秋**'), '评论回复嵌套引用');
+    assert(md.fmTags.includes('tags: [工作, wiki]'),
+      '用户自定义 Front Matter 标签生效（曾因 render 漏传 opts 而失效）', md.fmTags.split('\n').find(l => l.startsWith('tags')));
   }
 
   /* ---------- 用例 4：文件名与选项 ---------- */
@@ -250,10 +253,23 @@ async function runPipeline(page, fixture, options) {
       document.querySelector('h1').textContent = 'SPA 切换后的新文章';
       history.pushState({}, '', location.pathname + '?spa=2');
       const second = await window.__inkmark.handleAnalyze({ includeComments: false });
-      return { first: first.title, second: second.title };
+      // hash 路由 SPA（docsify 等）：仅 hash 变化也必须失效缓存
+      document.title = 'Hash 路由的第三篇';
+      document.querySelector('h1').textContent = 'Hash 路由的第三篇';
+      location.hash = '#/detail';
+      const third = await window.__inkmark.handleAnalyze({ includeComments: false });
+      // 导出时的标题覆盖不得污染共享缓存
+      await window.__inkmark.handleExport('markdown',
+        { includeComments: false, frontMatter: false, title: '一次性覆盖标题X' });
+      const fourth = await window.__inkmark.handleAnalyze({ includeComments: false });
+      return { first: first.title, second: second.title, third: third.title, fourth: fourth.title };
     });
     assert(spa.first !== spa.second && spa.second.includes('SPA'),
       'pushState 后缓存失效，导出新文章', JSON.stringify(spa));
+    assert(spa.third.includes('Hash 路由'),
+      'hash 变化也失效缓存（docsify 类 hash 路由 SPA）', spa.third);
+    assert(spa.fourth === spa.third,
+      '导出时的标题覆盖不污染缓存（重新分析回到真实标题）', JSON.stringify({ third: spa.third, fourth: spa.fourth }));
   }
 
   /* ---------- 用例 11：安全与边界（危险协议 / YAML 注入 / 并发去重 / 表头提升） ---------- */
@@ -293,10 +309,19 @@ async function runPipeline(page, fixture, options) {
         InkIR.create({ title: 't', contentEl: c5 }),
         { frontMatter: false, includeComments: false, complexTable: 'flatten' });
 
+      // f) 代码块内容含 4+ 反引号：围栏必须比内容中最长连串更长
+      const c6 = document.createElement('div');
+      const pre = document.createElement('pre');
+      pre.textContent = '外层文档示例\n````\n内层代码\n````';
+      c6.appendChild(pre);
+      const fenceOut = InkMarkdown.render(
+        InkIR.create({ title: 't', contentEl: c6 }),
+        { frontMatter: false, includeComments: false });
+
       return {
         badHref: c1.innerHTML.includes('javascript:'),
         okHref: c1.innerHTML.includes('/ok'),
-        htmlOut, fmOut, flatOut,
+        htmlOut, fmOut, flatOut, fenceOut,
         sameIR: ir1 === ir2,
       };
     });
@@ -307,6 +332,8 @@ async function runPipeline(page, fixture, options) {
     assert(sec.sameIR, '并发 getIR 去重（只跑一次提取）');
     assert(sec.flatOut.includes('| 列甲 | 列乙 |') && !sec.flatOut.includes('<table'),
       '无表头表格：表头提升转 GFM，不再原样输出未净化 HTML', sec.flatOut);
+    assert(/`{5}\n外层文档示例/.test(sec.fenceOut),
+      '代码内容含 4 个反引号时围栏加长到 5 个（此前只加长到 4 会提前闭合）', sec.fenceOut);
   }
 
   /* ---------- 用例 12：合并单元格网格展开（源自用户 v1 插件的实战方案） ---------- */
@@ -401,8 +428,9 @@ async function runPipeline(page, fixture, options) {
         fetched.push(String(url));
         return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['x'], { type: 'image/png' })) });
       };
-      // 同时含 markdown 形式与复杂表格直通产生的 HTML 形式（&amp; 编码）
+      // markdown 形式（含带 title 的变体）+ 复杂表格直通产生的 HTML 形式（&amp; 编码）
       const md = '![a](https://w.example.com/a.png?x=1&y=2)\n\n' +
+        '![t](https://w.example.com/t.png "示意图")\n\n' +
         '<table><tbody><tr><td><img src="https://w.example.com/b.png?ver=1&amp;mod=2"></td></tr></tbody></table>';
       const res = await InkExporter.localizeImages(md);
       return {
@@ -414,10 +442,12 @@ async function runPipeline(page, fixture, options) {
     });
     assert(img.authImages === true, 'Confluence 标记为鉴权图片站点（popup 据此自动切本地打包）');
     assert(img.out.includes('](assets/img-001.png)'), 'markdown 形式图片本地化');
-    assert(img.out.includes('src="assets/img-002.png"'), 'HTML 块内 <img> 也本地化（此前漏网）');
+    assert(img.out.includes('](assets/img-002.png "示意图")'),
+      '带 title 的 ![alt](url "title") 也本地化且保留 title（此前正则漏网）', img.out);
+    assert(img.out.includes('src="assets/img-003.png"'), 'HTML 块内 <img> 也本地化（此前漏网）');
     assert(img.fetched.includes('https://w.example.com/b.png?ver=1&mod=2'),
       'HTML 属性 &amp; 解码后抓取', img.fetched.join(', '));
-    assert(img.files.length === 2, '两张图片均落入 assets/');
+    assert(img.files.length === 3, '三张图片均落入 assets/');
 
     // 资产目录名含空格/括号时，md 引用必须转义（CommonMark 链接目标规则）
     const esc = await page.evaluate(async () => {

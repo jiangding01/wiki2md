@@ -39,6 +39,6 @@
 - 鉴权图片站点（Confluence/飞书/语雀）自动切换「本地打包」；HTML 块内 `<img>` 同样本地化
 - 文件名 `& # %` 换全角，规避各家 Markdown 编辑器的链接目标解析差异
 - SPA 缓存按 URL 失效、并发提取去重、重复注入幂等、导出互斥忙态
-- 80 项端到端断言（真实 Chromium 全管线）+ 扩展加载冒烟测试
+- 85 项端到端断言（真实 Chromium 全管线）+ 扩展加载冒烟测试
 
 [1.0.0]: https://github.com/jiangding01/wiki2md/releases/tag/v1.0.0

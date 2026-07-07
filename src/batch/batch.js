@@ -124,7 +124,8 @@ async function exportSelected() {
       await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: tab.id })
         .then((r) => { if (!r || !r.ok) throw new Error((r && r.error) || '注入失败'); });
       const res = await chrome.tabs.sendMessage(tab.id, {
-        type: 'INK_EXPORT', action: 'markdown', options: {},
+        // intent:'batch' → 与其它导出方式一致地记入导出历史
+        type: 'INK_EXPORT', action: 'markdown', options: { intent: 'batch' },
       });
       if (!res || !res.ok) throw new Error((res && res.error) || '提取失败');
 
