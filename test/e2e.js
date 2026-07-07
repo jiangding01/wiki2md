@@ -135,11 +135,15 @@ async function runPipeline(page, fixture, options) {
       return {
         tpl1: InkExporter.buildFilename('{title}', ir, 'md'),
         tpl2: InkExporter.buildFilename('{domain}-{title}-{date}', ir, 'md'),
+        tpl3: InkExporter.buildFilename('{title}',
+          { title: '审批页面&配置 #2 完成率100%', url: 'https://x' }, 'md'),
       };
     });
     assert(!/[\\/:*?"<>|]/.test(results.tpl1), '非法字符被净化', results.tpl1);
     assert(results.tpl2.startsWith('wiki.example.com-'), '{domain} 变量', results.tpl2);
     assert(/\d{4}-\d{2}-\d{2}/.test(results.tpl2), '{date} 变量', results.tpl2);
+    assert(results.tpl3 === '审批页面＆配置 ＃2 完成率100％.md',
+      '& # % 换全角（部分编辑器对链接目标里这些字符解析异常）', results.tpl3);
   }
 
   /* ---------- 用例 5：边界用例（表格扁平化 / 公式还原 / 零宽字符） ---------- */

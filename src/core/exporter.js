@@ -18,6 +18,9 @@ var InkExporter = window.InkExporter || {
     };
     let name = (template || '{title}').replace(/\{(title|domain|date)\}/g, (_, k) => vars[k]);
     name = name.replace(/[\\/:*?"<>|\n\r]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
+    // & # % 在各类 md 渲染器的链接目标里是惯犯（实体化/锚点/百分号编码），
+    // 文件名里换成全角等价字符——视觉无差别，对所有解析器都是普通文字
+    name = name.replace(/[&#%]/g, c => ({ '&': '＆', '#': '＃', '%': '％' }[c]));
     return `${name || 'untitled'}.${ext}`;
   },
 

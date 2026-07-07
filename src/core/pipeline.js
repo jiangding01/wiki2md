@@ -171,7 +171,11 @@
 
     const base = adapter._baseUrl();
     const rootIR = await getIR(settings);
-    const safe = (s) => String(s || 'untitled').replace(/[\\/:*?"<>|\n\r]+/g, '_').trim().slice(0, 80) || 'untitled';
+    // & # % 换全角：这些字符在部分 md 编辑器的链接目标解析里会出问题（用户实测踩坑）
+    const safe = (s) => String(s || 'untitled')
+      .replace(/[\\/:*?"<>|\n\r]+/g, '_')
+      .replace(/[&#%]/g, c => ({ '&': '＆', '#': '＃', '%': '％' }[c]))
+      .trim().slice(0, 80) || 'untitled';
 
     const nodes = [{ ir: rootIR, path: [] , title: rootIR.title }];
     const queue = [{ id: rootId, path: [rootIR.title] }];
