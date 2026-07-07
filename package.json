@@ -1,0 +1,32 @@
+{
+  "name": "wiki2md",
+  "version": "1.0.0",
+  "main": "index.js",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "prebuild": "node scripts/check-node.js",
+    "build": "node build.js",
+    "build:watch": "node build.js --watch",
+    "pretypecheck": "node scripts/check-node.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm run build",
+    "prepackage": "node scripts/check-node.js",
+    "package": "npm run build && node scripts/package-zip.js"
+  },
+  "keywords": ["confluence", "wiki", "markdown", "chrome-extension", "export", "offline", "zip"],
+  "author": "jiangding",
+  "license": "ISC",
+  "description": "Chrome extension that exports Confluence pages to an offline-ready Markdown + assets zip (images downloaded, TOC anchors fixed, code blocks/table formatting preserved, and links normalized).",
+  "dependencies": {
+    "@types/chrome": "^0.1.36",
+    "@types/turndown": "^5.0.6",
+    "esbuild": "^0.27.2",
+    "jszip": "^3.10.1",
+    "turndown": "^7.2.2",
+    "turndown-plugin-gfm": "^1.0.2",
+    "typescript": "^5.9.3"
+  }
+}

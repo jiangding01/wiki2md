@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --bg-top: #f4f8ff;
+      --bg-bottom: #eef4f0;
+      --ink: #10243e;
+      --muted: #5a6b81;
+      --card: #ffffff;
+      --brand: #0f5cc0;
+      --brand-strong: #0b4ea5;
+      --line: #d8e1ed;
+      --ok: #147a53;
+      --err: #c23a2d;
+      --hint: #0f5cc0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 360px;
+      margin: 0;
+      padding: 14px;
+      background: linear-gradient(165deg, var(--bg-top), var(--bg-bottom));
+      color: var(--ink);
+      font-family: "Avenir Next", "SF Pro Rounded", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 22px rgba(18, 49, 87, 0.08);
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.1;
+      letter-spacing: 0.2px;
+    }
+
+    .badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid #c5daf7;
+      background: #ebf3ff;
+      color: #2e63a7;
+    }
+
+    .desc {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .meta {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f7fafc;
+      padding: 8px 10px;
+      min-height: 46px;
+      margin-bottom: 10px;
+    }
+
+    .meta-label {
+      font-size: 11px;
+      color: #6c7e95;
+      margin-bottom: 3px;
+    }
+
+    .meta-value {
+      font-size: 12px;
+      line-height: 1.35;
+      color: var(--ink);
+      word-break: break-all;
+    }
+
+    .btn {
+      width: 100%;
+      border: none;
+      border-radius: 10px;
+      padding: 11px 12px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.2s ease;
+      box-shadow: 0 6px 16px rgba(13, 83, 173, 0.3);
+    }
+
+    .btn:focus-visible,
+    .sub-btn:focus-visible {
+      outline: 2px solid #7db1ff;
+      outline-offset: 2px;
+    }
+
+    .btn:hover:not(:disabled) {
+      filter: brightness(1.06);
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-main {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .spinner {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      display: none;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .btn[data-busy="true"] .spinner {
+      display: inline-block;
+    }
+
+    .btn-sub {
+      margin-top: 4px;
+      font-size: 11px;
+      opacity: 0.88;
+      text-align: center;
+    }
+
+    .actions {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .sub-btn {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+      color: #2a4b72;
+      font-size: 12px;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+
+    #status {
+      margin-top: 10px;
+      min-height: 36px;
+      padding: 8px 10px;
+      border-radius: 9px;
+      font-size: 12px;
+      line-height: 1.35;
+      border: 1px solid #d9e4f2;
+      background: #f5f8fd;
+      color: #31557f;
+    }
+
+    #status.success {
+      color: var(--ok);
+      border-color: #b8e1d1;
+      background: #edf9f3;
+    }
+
+    #status.error {
+      color: var(--err);
+      border-color: #f3c7c2;
+      background: #fff2f0;
+    }
+
+    #status.info {
+      color: var(--hint);
+      border-color: #bfd6f5;
+      background: #eef5ff;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="title-row">
+      <h1>wiki2md</h1>
+      <span class="badge">Confluence 页面</span>
+    </div>
+    <p class="desc">将当前页面导出为离线 Markdown + 资源压缩包，保留图片、代码块与目录锚点。</p>
+
+    <div class="meta" id="pageMeta">
+      <div class="meta-label">当前页面</div>
+      <div class="meta-value" id="pageMetaValue">正在检测活动标签页...</div>
+    </div>
+
+    <button id="downloadBtn" class="btn" type="button">
+      <div class="btn-main">
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="downloadBtnLabel">开始导出 .zip</span>
+      </div>
+      <div class="btn-sub">Markdown + 资源文件 + 元信息</div>
+    </button>
+
+    <div class="actions">
+      <button class="sub-btn" id="openOptionsBtn" type="button">打开设置</button>
+      <button class="sub-btn" id="refreshBtn" type="button">刷新状态</button>
+    </div>
+
+    <div id="status" class="info" role="status" aria-live="polite">准备就绪。</div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
