@@ -2,7 +2,7 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。日志格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
-## [未发布]
+## [1.1.0] - 2026-07-07
 
 ### 新增
 
@@ -93,4 +93,5 @@
 - SPA 缓存按 URL 失效、并发提取去重、重复注入幂等、导出互斥忙态
 - 85 项端到端断言（真实 Chromium 全管线）+ 扩展加载冒烟测试
 
+[1.1.0]: https://github.com/jiangding01/wiki2md/releases/tag/v1.1.0
 [1.0.0]: https://github.com/jiangding01/wiki2md/releases/tag/v1.0.0
