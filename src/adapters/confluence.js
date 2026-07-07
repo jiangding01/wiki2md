@@ -144,12 +144,20 @@ const ConfluenceAdapter = {
     const pageId = this._pageId();
     if (!pageId) return [];
     const base = this._baseUrl();
-    const url = `${base}/rest/api/content/${pageId}/child/comment` +
-      `?expand=body.view,history,extensions.inlineProperties,children.comment.body.view,children.comment.history&limit=100`;
-    const res = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return (data.results || []).map(c => this._toAnnotation(c));
+    let url = `${base}/rest/api/content/${pageId}/child/comment` +
+      `?expand=body.view,history,extensions.inlineProperties,children.comment.body.view,children.comment.history&limit=50`;
+    const out = [];
+    // 分页拉全：大文档的评论可能远超一页
+    for (let page = 0; url && page < 10; page++) {
+      const res = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      out.push(...(data.results || []).map(c => this._toAnnotation(c)));
+      url = (data._links && data._links.next)
+        ? ((data._links.base || base) + data._links.next)
+        : null;
+    }
+    return out;
   },
 
   _toAnnotation(c) {

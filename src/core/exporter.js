@@ -38,43 +38,91 @@ const InkExporter = {
 
   /**
    * 图片本地化：抓取 markdown 中引用的图片 → assets/ 目录 → 改写为相对路径
+   * 并发 4 路，单张 20s 超时；data: URI 同样落盘（fetch 原生支持）。
    * 返回 { markdown, files: Map<path, Blob>, failed: string[] }
    */
   async localizeImages(markdown, onProgress) {
     const urls = [];
-    // 匹配 ![alt](url) —— 摘墨生成的 md 图片全部是这个形式
-    const re = /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g;
+    // 摘墨生成的 md 图片全部是 ![alt](url) 形式
+    const re = /!\[[^\]]*\]\(((?:https?:\/\/|data:image\/)[^)\s]+)\)/g;
     let m;
     while ((m = re.exec(markdown)) !== null) {
-      if (!urls.includes(m[2])) urls.push(m[2]);
+      if (!urls.includes(m[1])) urls.push(m[1]);
     }
 
     const files = new Map();
     const failed = [];
     const rename = new Map(); // 原 URL → 相对路径
+    let done = 0;
 
-    let idx = 0;
-    for (const url of urls) {
-      idx += 1;
-      if (onProgress) onProgress(idx, urls.length);
+    const fetchOne = async (url, idx) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20_000);
       try {
-        const res = await fetch(url, { credentials: 'include' });
+        const res = await fetch(url, { credentials: 'include', signal: ctrl.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         const ext = this._extFromType(blob.type) || this._extFromUrl(url) || 'png';
-        const path = `assets/img-${String(idx).padStart(3, '0')}.${ext}`;
+        const path = `assets/img-${String(idx + 1).padStart(3, '0')}.${ext}`;
         files.set(path, blob);
         rename.set(url, path);
       } catch (e) {
         failed.push(url); // 抓取失败保留远程链接，不阻塞导出
+      } finally {
+        clearTimeout(timer);
+        done += 1;
+        if (onProgress) onProgress(done, urls.length);
       }
-    }
+    };
+
+    // 4 路并发的简单工作池
+    const CONCURRENCY = 4;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < urls.length) {
+        const idx = cursor++;
+        await fetchOne(urls[idx], idx);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker));
 
     let out = markdown;
     for (const [url, path] of rename) {
       out = out.split(`](${url})`).join(`](${path})`);
     }
     return { markdown: out, files, failed };
+  },
+
+  /**
+   * 导出历史：记录到 chrome.storage.local。
+   * 单条正文上限 300KB，最多 30 条且全库正文总量约 3MB——超限的旧条目只留元信息。
+   */
+  async recordHistory(ir, markdown, filename, action) {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+    try {
+      const entry = {
+        ts: Date.now(),
+        title: ir.title,
+        url: ir.url,
+        adapter: (ir._adapter && ir._adapter.name) || '通用模式',
+        filename,
+        action,
+        chars: markdown.length,
+        markdown: markdown.length <= 300_000 ? markdown : null,
+      };
+      const { inkmarkHistory = [] } = await chrome.storage.local.get('inkmarkHistory');
+      const list = [entry].concat(inkmarkHistory).slice(0, 30);
+      let budget = 3_000_000;
+      for (const e of list) {
+        if (e.markdown) {
+          budget -= e.markdown.length;
+          if (budget < 0) e.markdown = null;
+        }
+      }
+      await chrome.storage.local.set({ inkmarkHistory: list });
+    } catch (e) {
+      console.warn('[inkmark] history record failed:', e); // 历史失败绝不阻塞导出
+    }
   },
 
   /** md + 本地化图片 → zip 并下载 */

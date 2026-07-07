@@ -97,6 +97,10 @@ const FeishuAdapter = {
       await this._sleep(120); // 等虚拟滚动渲染
       if (host.scrollTop <= before + 1) break; // 到底了
       guard += 1;
+      if (guard % 10 === 0 && window.__inkProgress) {
+        const pct = Math.min(99, Math.round(host.scrollTop / host.scrollHeight * 100));
+        window.__inkProgress(`正在滚动采集长文档 ${pct}%…`);
+      }
     }
     harvest();
     host.scrollTop = original;

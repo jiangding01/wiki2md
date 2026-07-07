@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>边界用例合集 - 测试站</title>
+</head>
+<body>
+  <article id="custom-zone">
+    <h1 id="the-title">边界用例合集</h1>
+
+    <h2>表格：单元格里有块级元素</h2>
+    <table>
+      <thead><tr><th>方案</th><th>说明</th><th>示例</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><p>方案A</p></td>
+          <td>
+            <p>第一段说明。</p>
+            <p>第二段说明。</p>
+            <ul><li>要点一</li><li>要点二</li></ul>
+          </td>
+          <td><pre><code>npm install
+npm run build</code></pre></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>公式</h2>
+    <p>质能方程
+      <span class="katex">
+        <span class="katex-mathml">
+          <math><semantics><mrow></mrow>
+            <annotation encoding="application/x-tex">E=mc^2</annotation>
+          </semantics></math>
+        </span>
+        <span class="katex-html" aria-hidden="true"><span class="base">E=mc2</span></span>
+      </span>
+      是狭义相对论的推论。
+    </p>
+    <p>MathJax 行内：<script type="math/tex">\alpha + \beta</script><span class="MathJax">α+β</span></p>
+
+    <h2>零宽字符</h2>
+    <p>这段文字里藏了零宽空格&#8203;和&#65279;BOM，导出后应当被清理。</p>
+
+    <p>正文足够长才能让 Readability 认为这是文章主体。虚拟滚动、懒加载、
+    表格扁平化、公式还原、脚注编织——这些细节共同决定了导出 Markdown 的质量下限。
+    一个好的导出工具应当在任何边界情况下都不产出破碎的文档结构，宁可降级也不残缺。
+    这里再补充一些文字来撑起正文长度，确保 charThreshold 达标，通用提取器可以正常工作。</p>
+  </article>
+</body>
+</html>

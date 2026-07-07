@@ -23,9 +23,11 @@ const CONTENT_FILES = [
   'src/core/markdown.js',
   'src/adapters/registry.js',
   'src/adapters/generic.js',
+  'src/adapters/custom.js',
   'src/adapters/confluence.js',
   'src/adapters/feishu.js',
   'src/adapters/cn-sites.js',
+  'src/adapters/intl-sites.js',
   'src/core/exporter.js',
   'src/core/pipeline.js',
 ];
@@ -134,6 +136,58 @@ async function runPipeline(page, fixture, options) {
     assert(!/[\\/:*?"<>|]/.test(results.tpl1), '非法字符被净化', results.tpl1);
     assert(results.tpl2.startsWith('wiki.example.com-'), '{domain} 变量', results.tpl2);
     assert(/\d{4}-\d{2}-\d{2}/.test(results.tpl2), '{date} 变量', results.tpl2);
+  }
+
+  /* ---------- 用例 5：边界用例（表格扁平化 / 公式还原 / 零宽字符） ---------- */
+  console.log('\n[5] 边界用例 · 表格 / 公式 / 不可见字符');
+  {
+    const { markdown: md } = await runPipeline(page, 'edge-cases.html', {
+      frontMatter: false, includeComments: false,
+    });
+    const tableLine = md.split('\n').find(l => l.includes('方案A'));
+    assert(!!tableLine && tableLine.includes('第一段说明') && tableLine.includes('• 要点一'),
+      '单元格块级元素扁平化为单行', tableLine);
+    assert(tableLine && tableLine.includes('`npm install npm run build`'),
+      '单元格内代码块 → 行内 code', tableLine);
+    assert(md.includes('$E=mc^2$'), 'KaTeX 还原为 $LaTeX$');
+    assert(md.includes('$\\alpha + \\beta$'), 'MathJax v2 还原为 $LaTeX$');
+    assert(!md.includes('​') && !md.includes('﻿'), '零宽字符 / BOM 被清理');
+  }
+
+  /* ---------- 用例 6：Markdown 风格设置 ---------- */
+  console.log('\n[6] Markdown 风格 · 用户偏好生效');
+  {
+    const { markdown: md } = await runPipeline(page, 'generic-article.html', {
+      frontMatter: false, includeComments: false,
+      mdBullet: '*', mdEmphasis: '_', mdFence: '~~~',
+    });
+    assert(/^\*   .*测量缓存/m.test(md) || /^\* .*测量缓存/m.test(md), '列表符号切换为 *');
+    assert(md.includes('_测量缓存_'), '强调符号切换为 _');
+    assert(/~~~javascript\n/.test(md), '代码围栏切换为 ~~~');
+  }
+
+  /* ---------- 用例 7：自定义站点规则 ---------- */
+  console.log('\n[7] CustomRuleAdapter · 用户规则优先');
+  {
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/edge-cases.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const result = await page.evaluate(async () => {
+      const settings = await window.__inkmark.loadSettings({
+        frontMatter: false, includeComments: false,
+        customRules: [{
+          name: '测试规则', match: 'edge-cases', contentSel: '#custom-zone',
+          titleSel: '#the-title', removeSel: 'h2',
+        }],
+      });
+      const ir = await window.__inkmark.getIR(settings);
+      return { adapter: ir._adapter, title: ir.title, hasH2: !!ir.contentEl.querySelector('h2') };
+    });
+    assert(result.adapter.id === 'custom', '命中自定义规则适配器', result.adapter.id);
+    assert(result.adapter.name === '测试规则', '徽章显示规则名');
+    assert(result.title === '边界用例合集', '标题选择器生效');
+    assert(!result.hasH2, '剔除选择器生效（h2 被移除）');
   }
 
   await browser.close();

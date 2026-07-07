@@ -18,6 +18,8 @@ const GenericAdapter = {
     // Readability 会改写传入的文档，必须用克隆
     const docClone = document.cloneNode(true);
     InkIR.fixLazyImages(docClone);
+    // 公式还原必须先于 Readability——它会把 math/tex 脚本当普通脚本剥掉
+    InkIR.restoreMath(docClone.body || docClone.documentElement);
 
     let article = null;
     try {

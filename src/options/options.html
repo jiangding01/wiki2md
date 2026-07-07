@@ -10,77 +10,199 @@
     <header class="header">
       <div class="seal">摘</div>
       <div>
-        <h1>摘墨 · 默认设置</h1>
+        <h1>摘墨 · 设置</h1>
         <p class="sub">这里的选择会成为 popup、右键菜单与快捷键导出的默认行为</p>
       </div>
     </header>
 
-    <section class="card">
-      <h2>导出内容</h2>
-      <label class="row">
-        <div>
-          <span class="label">YAML Front Matter</span>
-          <span class="hint">在文件头部写入标题、来源、作者、摘录时间等元数据（Obsidian 友好）</span>
-        </div>
-        <span class="toggle"><input type="checkbox" id="frontMatter"><i></i></span>
-      </label>
-      <label class="row">
-        <div>
-          <span class="label">文档标题作为一级标题</span>
-          <span class="hint">在正文开头插入 <code># 标题</code></span>
-        </div>
-        <span class="toggle"><input type="checkbox" id="includeTitle"><i></i></span>
-      </label>
-    </section>
+    <nav class="tabs">
+      <button class="tab active" data-tab="general">通用</button>
+      <button class="tab" data-tab="style">Markdown 风格</button>
+      <button class="tab" data-tab="rules">站点规则</button>
+      <button class="tab" data-tab="history">导出历史</button>
+    </nav>
 
-    <section class="card">
-      <h2>评论</h2>
-      <label class="row">
-        <div>
-          <span class="label">导出评论</span>
-          <span class="hint">支持平台：Confluence（页面评论 + 划线评论）；更多平台适配中</span>
+    <!-- ============ 通用 ============ -->
+    <div class="tab-panel active" id="panel-general">
+      <section class="card">
+        <h2>导出内容</h2>
+        <label class="row">
+          <div>
+            <span class="label">YAML Front Matter</span>
+            <span class="hint">在文件头部写入标题、来源、作者、摘录时间等元数据（Obsidian 友好）</span>
+          </div>
+          <span class="toggle"><input type="checkbox" id="frontMatter"><i></i></span>
+        </label>
+        <div class="row">
+          <div>
+            <span class="label">Front Matter 标签</span>
+            <span class="hint">写入 <code>tags:</code> 字段，逗号分隔多个</span>
+          </div>
+          <input type="text" id="frontMatterTags" class="input" placeholder="clippings">
         </div>
-        <span class="toggle"><input type="checkbox" id="includeComments"><i></i></span>
-      </label>
-      <div class="row">
-        <div>
-          <span class="label">评论呈现方式</span>
-          <span class="hint">脚注：划线评论锚定在原文位置；附录：统一放在文末「💬 评论」区</span>
-        </div>
-        <select id="commentStyle" class="select">
-          <option value="both">划线转脚注 + 其余进附录（推荐）</option>
-          <option value="footnote">仅脚注（无锚点的进附录）</option>
-          <option value="appendix">全部进附录</option>
-        </select>
-      </div>
-    </section>
+        <label class="row">
+          <div>
+            <span class="label">文档标题作为一级标题</span>
+            <span class="hint">在正文开头插入 <code># 标题</code></span>
+          </div>
+          <span class="toggle"><input type="checkbox" id="includeTitle"><i></i></span>
+        </label>
+        <label class="row">
+          <div>
+            <span class="label">记录导出历史</span>
+            <span class="hint">最近 30 次导出可在「导出历史」中找回（仅存本机）</span>
+          </div>
+          <span class="toggle"><input type="checkbox" id="keepHistory"><i></i></span>
+        </label>
+      </section>
 
-    <section class="card">
-      <h2>图片与文件</h2>
-      <div class="row">
-        <div>
-          <span class="label">图片默认策略</span>
-          <span class="hint">本地打包：抓取图片存入 assets/ 并压缩为 ZIP（需要登录态的图片也能带走）</span>
+      <section class="card">
+        <h2>评论</h2>
+        <label class="row">
+          <div>
+            <span class="label">导出评论</span>
+            <span class="hint">支持平台：Confluence（页面评论 + 划线评论，自动分页拉全）；更多平台适配中</span>
+          </div>
+          <span class="toggle"><input type="checkbox" id="includeComments"><i></i></span>
+        </label>
+        <div class="row">
+          <div>
+            <span class="label">评论呈现方式</span>
+            <span class="hint">脚注：划线评论锚定在原文位置；附录：统一放在文末「💬 评论」区</span>
+          </div>
+          <select id="commentStyle" class="select">
+            <option value="both">划线转脚注 + 其余进附录（推荐）</option>
+            <option value="footnote">仅脚注（无锚点的进附录）</option>
+            <option value="appendix">全部进附录</option>
+          </select>
         </div>
-        <select id="imageStrategy" class="select">
-          <option value="remote">保留远程链接</option>
-          <option value="zip">本地打包（ZIP）</option>
-        </select>
-      </div>
-      <div class="row">
-        <div>
-          <span class="label">文件名模板</span>
-          <span class="hint">可用变量：<code>{title}</code> 标题 · <code>{domain}</code> 域名 · <code>{date}</code> 日期</span>
+      </section>
+
+      <section class="card">
+        <h2>图片与文件</h2>
+        <div class="row">
+          <div>
+            <span class="label">图片默认策略</span>
+            <span class="hint">本地打包：并发抓取图片存入 assets/ 并压缩为 ZIP（需要登录态的图片也能带走）</span>
+          </div>
+          <select id="imageStrategy" class="select">
+            <option value="remote">保留远程链接</option>
+            <option value="zip">本地打包（ZIP）</option>
+          </select>
         </div>
-        <input type="text" id="filenameTemplate" class="input" placeholder="{title}">
-      </div>
-    </section>
+        <div class="row">
+          <div>
+            <span class="label">文件名模板</span>
+            <span class="hint">可用变量：<code>{title}</code> 标题 · <code>{domain}</code> 域名 · <code>{date}</code> 日期</span>
+          </div>
+          <input type="text" id="filenameTemplate" class="input" placeholder="{title}">
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ Markdown 风格 ============ -->
+    <div class="tab-panel" id="panel-style">
+      <section class="card">
+        <h2>语法偏好</h2>
+        <div class="row">
+          <div>
+            <span class="label">无序列表符号</span>
+            <span class="hint">影响所有 <code>ul</code> 列表项的前缀</span>
+          </div>
+          <select id="mdBullet" class="select select-narrow">
+            <option value="-">- （短横线）</option>
+            <option value="*">* （星号）</option>
+            <option value="+">+ （加号）</option>
+          </select>
+        </div>
+        <div class="row">
+          <div>
+            <span class="label">强调符号</span>
+            <span class="hint">斜体/加粗使用 <code>*</code> 或 <code>_</code></span>
+          </div>
+          <select id="mdEmphasis" class="select select-narrow">
+            <option value="*">*斜体* / **加粗**</option>
+            <option value="_">_斜体_ / __加粗__</option>
+          </select>
+        </div>
+        <div class="row">
+          <div>
+            <span class="label">代码块围栏</span>
+            <span class="hint">fenced code block 的围栏字符</span>
+          </div>
+          <select id="mdFence" class="select select-narrow">
+            <option value="```">``` （反引号）</option>
+            <option value="~~~">~~~ （波浪号）</option>
+          </select>
+        </div>
+        <div class="row">
+          <div>
+            <span class="label">链接样式</span>
+            <span class="hint">内联：<code>[文字](url)</code>；引用：<code>[文字][1]</code> 并在文末集中列出</span>
+          </div>
+          <select id="mdLinkStyle" class="select select-narrow">
+            <option value="inlined">内联链接</option>
+            <option value="referenced">引用式链接</option>
+          </select>
+        </div>
+      </section>
+      <p class="panel-note">高亮（==文本==）、脚注、callout 引用块等增强语法始终启用，兼容 Obsidian / Typora。</p>
+    </div>
+
+    <!-- ============ 站点规则 ============ -->
+    <div class="tab-panel" id="panel-rules">
+      <section class="card">
+        <h2>自定义站点规则</h2>
+        <p class="card-desc">
+          内置适配器效果不佳，或想精配某个内网系统？添加一条规则即可，<b>无需写代码</b>。
+          命中规则的页面优先使用你的选择器提取正文；选择器失配时自动回退通用模式，不会导出失败。
+        </p>
+        <div id="rules-list"></div>
+        <button id="btn-add-rule" class="btn-ghost btn-add">＋ 添加规则</button>
+      </section>
+      <section class="card">
+        <h2>示例</h2>
+        <div class="example">
+          <div class="example-row"><b>规则名</b><span>公司内部 GitLab Wiki</span></div>
+          <div class="example-row"><b>URL 包含</b><span><code>gitlab.mycorp.com</code>（命中所有含此子串的地址）</span></div>
+          <div class="example-row"><b>正文选择器</b><span><code>.wiki-content</code>（右键正文 → 检查，找到包住全文的元素）</span></div>
+          <div class="example-row"><b>标题选择器</b><span><code>h1.wiki-title</code>（可留空，默认用网页标题）</span></div>
+          <div class="example-row"><b>剔除选择器</b><span><code>.sidebar, .edit-btn</code>（逗号分隔，可留空）</span></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============ 导出历史 ============ -->
+    <div class="tab-panel" id="panel-history">
+      <section class="card">
+        <div class="card-head-row">
+          <h2>最近导出</h2>
+          <button id="btn-clear-history" class="btn-ghost btn-small">清空历史</button>
+        </div>
+        <p class="card-desc">最近 30 次导出记录，仅存于本机。正文过大（&gt;300KB）的记录只保留元信息。</p>
+        <div id="history-list"></div>
+      </section>
+    </div>
 
     <footer class="footer">
       <span id="save-status" class="save-status"></span>
       <button id="btn-save" class="btn-primary">保存设置</button>
     </footer>
   </main>
+
+  <template id="tpl-rule">
+    <div class="rule-card">
+      <div class="rule-grid">
+        <label>规则名<input class="input r-name" placeholder="我的站点"></label>
+        <label>URL 包含 *<input class="input r-match" placeholder="wiki.mycorp.com"></label>
+        <label>正文选择器 *<input class="input r-content" placeholder=".article-body"></label>
+        <label>标题选择器<input class="input r-title" placeholder="h1（可空）"></label>
+        <label class="rule-wide">剔除选择器<input class="input r-remove" placeholder=".sidebar, .ad（逗号分隔，可空）"></label>
+      </div>
+      <button class="rule-del" title="删除此规则">✕</button>
+    </div>
+  </template>
+
   <script src="options.js"></script>
 </body>
 </html>

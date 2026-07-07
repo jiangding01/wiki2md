@@ -97,7 +97,8 @@ const InkIR = {
   /** 移除噪音节点：脚本、样式、隐藏元素、常见装饰性控件 */
   removeNoise(root, extraSelectors) {
     const NOISE = [
-      'script', 'style', 'link', 'noscript', 'iframe[src*="ads"]',
+      // math/tex 脚本是 MathJax 公式源码，restoreMath 需要它，必须豁免
+      'script:not([type^="math/tex"])', 'style', 'link', 'noscript', 'iframe[src*="ads"]',
       'button', '[role="tooltip"]', '[aria-hidden="true"] svg',
       '.inkmark-ignore',
     ].concat(extraSelectors || []);
@@ -123,6 +124,41 @@ const InkIR = {
    */
   markCodeBlock(preEl, lang) {
     if (lang) preEl.setAttribute('data-ink-lang', lang.toLowerCase());
+  },
+
+  /**
+   * 还原数学公式：把 KaTeX / MathJax v2 渲染结果还原为 $LaTeX$ 源码。
+   * 产出 <span data-ink-math> 标记元素（而非文本节点）——
+   * Turndown 会转义文本里的反斜杠，专用元素 + 专用规则才能原样输出 TeX。
+   */
+  restoreMath(root) {
+    const mathEl = (tex, display) => {
+      const el = document.createElement('span');
+      el.setAttribute('data-ink-math', tex);
+      if (display) el.setAttribute('data-ink-display', '1');
+      // 必须有文本内容：空元素会被 Readability 的清理逻辑移除
+      el.textContent = tex;
+      return el;
+    };
+    // KaTeX 块级公式（先于行内处理，内部包含 .katex）
+    root.querySelectorAll('.katex-display').forEach((el) => {
+      const ann = el.querySelector('annotation[encoding="application/x-tex"]');
+      if (ann) el.replaceWith(mathEl(ann.textContent.trim(), true));
+    });
+    root.querySelectorAll('.katex').forEach((el) => {
+      const ann = el.querySelector('annotation[encoding="application/x-tex"]');
+      if (ann) el.replaceWith(mathEl(ann.textContent.trim(), false));
+    });
+    // MathJax v2：源码在 <script type="math/tex">，渲染节点是冗余的
+    const scripts = root.querySelectorAll('script[type^="math/tex"]');
+    if (scripts.length) {
+      scripts.forEach((s) => {
+        const display = (s.getAttribute('type') || '').includes('display');
+        s.replaceWith(mathEl(s.textContent.trim(), display));
+      });
+      root.querySelectorAll('.MathJax, .MathJax_Preview, .MathJax_Display, .MathJax_CHTML, .MathJax_SVG')
+        .forEach(n => n.remove());
+    }
   },
 
   /** 统计信息，popup 用来展示 */

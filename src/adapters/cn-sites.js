@@ -59,10 +59,14 @@ const ZhihuAdapter = {
     container.appendChild(InkIR.detach(source));
     InkIR.fixLazyImages(container);
     InkIR.removeNoise(container, ['.RichText-LinkCardContainer button', '.ZVideoLinkCard-triggerButton']);
-    // 知乎公式图片：alt 里是 LaTeX，转成 $..$
+    // 知乎公式图片：alt 里是 LaTeX，转成 data-ink-math 标记（转换层原样输出 $..$）
     container.querySelectorAll('img.ztext-math, img[eeimg="1"]').forEach((img) => {
       const tex = img.getAttribute('alt');
-      if (tex) img.replaceWith(document.createTextNode(`$${tex}$`));
+      if (tex) {
+        const span = document.createElement('span');
+        span.setAttribute('data-ink-math', tex);
+        img.replaceWith(span);
+      }
     });
     InkIR.absolutizeUrls(container);
 
@@ -114,6 +118,84 @@ const JuejinAdapter = {
   },
 };
 
+/* ---------------- CSDN ---------------- */
+const CsdnAdapter = {
+  id: 'csdn',
+  name: 'CSDN',
+  badge: 'precise',
+
+  match(loc) {
+    return /(\.|^)csdn\.net$/.test(loc.hostname) && /\/article\/details\//.test(loc.pathname);
+  },
+
+  async extract() {
+    const source = document.querySelector('#content_views');
+    if (!source) return GenericAdapter.extract();
+
+    const container = document.createElement('div');
+    container.appendChild(InkIR.detach(source));
+    InkIR.fixLazyImages(container);
+    InkIR.removeNoise(container, [
+      '.hljs-button', '.hide-preCode-box', '.look-more-preCode',
+      '.dp-highlighter .bar', 'pre .toolbar',
+    ]);
+    // CSDN 折叠代码块：展开被隐藏的部分
+    container.querySelectorAll('pre.set-code-hide').forEach(p => p.classList.remove('set-code-hide'));
+    InkIR.absolutizeUrls(container);
+
+    const titleEl = document.querySelector('h1.title-article, #articleContentId');
+    const authorEl = document.querySelector('.follow-nickName, .profile-intro .user-name');
+
+    return InkIR.create({
+      title: titleEl ? titleEl.textContent.trim() : document.title,
+      byline: authorEl ? authorEl.textContent.trim() : null,
+      siteName: 'CSDN',
+      publishedTime: (document.querySelector('.bar-content .time') || {}).textContent || null,
+      contentEl: container,
+    });
+  },
+};
+
+/* ---------------- 语雀 ---------------- */
+const YuqueAdapter = {
+  id: 'yuque',
+  name: '语雀',
+  badge: 'precise',
+
+  match(loc, doc) {
+    return /(\.|^)yuque\.com$/.test(loc.hostname) &&
+      !!doc.querySelector('.ne-viewer-body, .lake-content, #content .yuque-doc-content');
+  },
+
+  async extract() {
+    const source = document.querySelector('.ne-viewer-body, .lake-content, #content .yuque-doc-content');
+    if (!source) return GenericAdapter.extract();
+
+    const container = document.createElement('div');
+    container.appendChild(InkIR.detach(source));
+    InkIR.fixLazyImages(container);
+    InkIR.removeNoise(container, ['.ne-ui-hover-toolbar', '[data-testid="doc-reader-toolbar"]']);
+    // 语雀标题 block：ne-h1..ne-h6 → 真实 h 标签
+    for (let level = 1; level <= 6; level++) {
+      container.querySelectorAll(`ne-h${level}, [data-card-type] h${level}`).forEach((el) => {
+        const h = document.createElement('h' + level);
+        h.innerHTML = el.innerHTML;
+        el.replaceWith(h);
+      });
+    }
+    InkIR.absolutizeUrls(container);
+
+    const titleEl = document.querySelector('#article-title, .DocReader h1, [data-testid="doc-title"]');
+    return InkIR.create({
+      title: titleEl ? titleEl.textContent.trim() : document.title.replace(/\s*·\s*语雀.*$/, '').trim(),
+      siteName: '语雀',
+      contentEl: container,
+    });
+  },
+};
+
 window.WechatAdapter = WechatAdapter;
 window.ZhihuAdapter = ZhihuAdapter;
 window.JuejinAdapter = JuejinAdapter;
+window.CsdnAdapter = CsdnAdapter;
+window.YuqueAdapter = YuqueAdapter;

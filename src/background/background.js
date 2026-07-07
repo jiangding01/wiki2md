@@ -13,9 +13,11 @@ const CONTENT_FILES = [
   'src/core/markdown.js',
   'src/adapters/registry.js',
   'src/adapters/generic.js',
+  'src/adapters/custom.js',
   'src/adapters/confluence.js',
   'src/adapters/feishu.js',
   'src/adapters/cn-sites.js',
+  'src/adapters/intl-sites.js',
   'src/core/exporter.js',
   'src/core/pipeline.js',
 ];
@@ -27,17 +29,10 @@ async function injectPipeline(tabId) {
   });
 }
 
+// 设置的完整默认值与合并逻辑在 pipeline.js（页面侧读 storage）；
+// 这里无需再传 options——发空对象即可，pipeline 自行读取用户设置。
 async function getSettings() {
-  const defaults = {
-    frontMatter: true,
-    includeComments: true,
-    commentStyle: 'both',
-    imageStrategy: 'remote',
-    filenameTemplate: '{title}',
-    includeTitle: true,
-  };
-  const stored = await chrome.storage.sync.get('inkmarkSettings');
-  return Object.assign(defaults, stored.inkmarkSettings || {});
+  return {};
 }
 
 /* ---------- 右键菜单 ---------- */

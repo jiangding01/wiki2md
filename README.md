@@ -15,18 +15,26 @@
 <img src="docs/screenshots/popup-light.png" width="300" alt="摘墨 popup 浅色主题">&nbsp;&nbsp;<img src="docs/screenshots/popup-dark.png" width="300" alt="摘墨 popup 深色主题">
 <br><br>
 <img src="docs/screenshots/preview-light.png" width="640" alt="预览页：渲染效果与 Markdown 源码对照">
+<br><br>
+<img src="docs/screenshots/options-rules.png" width="420" alt="自定义站点规则">&nbsp;<img src="docs/screenshots/options-history.png" width="420" alt="导出历史">
 </div>
 
 ## 功能
 
 - 🌐 **任意网页**：Readability 正文提取兜底，没有专门适配的网站也能导出
-- 🎯 **站点精配**：Confluence（含评论）、飞书文档（实验性）、微信公众号、知乎、掘金
-- 💬 **评论导出**：划线评论锚定为脚注 `[^1]`，页面评论汇入文末「💬 评论」区，回复嵌套呈现
-- 🖼 **图片两种策略**：保留远程链接，或抓取（自动携带登录态）打包为 `assets/` + ZIP
+- 🎯 **站点精配**：Confluence（含评论）、飞书文档（实验性）、微信公众号、知乎、掘金、CSDN、语雀、Stack Overflow（问题 + 全部回答结构化导出）
+- 🛠 **自定义站点规则**：不写代码，填「URL 包含 + 正文选择器」即可精配任何站点（内网系统友好），优先级高于内置适配器，失配自动回退
+- 💬 **评论导出**：划线评论锚定为脚注 `[^1]`，页面评论汇入文末「💬 评论」区，回复嵌套呈现，自动分页拉全
+- 🧮 **公式还原**：KaTeX / MathJax / 知乎公式图 → `$LaTeX$` 源码
+- 🖼 **图片两种策略**：保留远程链接，或并发抓取（自动携带登录态、20s 超时兜底）打包为 `assets/` + ZIP
+- 📚 **批量导出**：把当前窗口多个标签页一次导出为一个 ZIP（按需授权，单页失败不影响整批）
+- 🕘 **导出历史**：最近 30 次导出可随时找回、重新下载或复制（仅存本机）
 - 📋 **多种出口**：下载 .md / 复制剪贴板 / 新标签页预览（对照·效果·源码三视图）
 - ✂️ **右键节选**：选中任意内容 → 右键 → 导出为 Markdown
 - ⌨️ **快捷键**：`Alt+Shift+M` 一键下载当前页
-- 🗂 **YAML Front Matter**：标题/来源/作者/摘录时间，文件名模板 `{title} {domain} {date}`
+- 🗂 **YAML Front Matter**：标题/来源/作者/摘录时间/自定义 tags，文件名模板 `{title} {domain} {date}`
+- ✒️ **Markdown 风格可定制**：列表符号、强调符号、代码围栏、内联/引用式链接
+- 🧱 **稳定性内建**：表格单元格块级内容自动扁平化（GFM 表格不再碎裂）、零宽字符清理、注入失败自动重试、进度实时回显
 - 🌙 **深浅色主题**自动跟随系统
 
 ## 安装（开发者模式）

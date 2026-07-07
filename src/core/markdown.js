@@ -7,17 +7,19 @@
 
 const InkMarkdown = {
 
-  /** 构建配置好的 TurndownService（含 GFM 与自定义规则） */
-  createTurndown() {
+  /** 构建配置好的 TurndownService（含 GFM 与自定义规则）。style 来自用户设置。 */
+  createTurndown(style) {
+    const s = style || {};
     const td = new TurndownService({
       headingStyle: 'atx',
       hr: '---',
-      bulletListMarker: '-',
+      bulletListMarker: s.mdBullet || '-',
       codeBlockStyle: 'fenced',
-      fence: '```',
-      emDelimiter: '*',
-      strongDelimiter: '**',
-      linkStyle: 'inlined',
+      fence: s.mdFence || '```',
+      emDelimiter: s.mdEmphasis || '*',
+      strongDelimiter: (s.mdEmphasis || '*') === '_' ? '__' : '**',
+      linkStyle: s.mdLinkStyle || 'inlined',
+      linkReferenceStyle: 'full',
     });
     td.use(turndownPluginGfm.gfm);
 
@@ -54,7 +56,9 @@ const InkMarkdown = {
         const codeEl = node.querySelector('code');
         let text = (codeEl || node).textContent || '';
         text = text.replace(/\n$/, '');
-        const fence = text.includes('```') ? '````' : '```';
+        // 尊重用户的围栏偏好；正文里已含围栏字符时自动加长
+        const base = s.mdFence || '```';
+        const fence = text.includes(base) ? base + base[0] : base;
         return `\n\n${fence}${lang}\n${text}\n${fence}\n\n`;
       },
     });
@@ -90,6 +94,15 @@ const InkMarkdown = {
       },
     });
 
+    // 公式（restoreMath 的产物）：原样输出 TeX，不做任何转义
+    td.addRule('math', {
+      filter: (node) => node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-ink-math'),
+      replacement: (content, node) => {
+        const tex = node.getAttribute('data-ink-math') || '';
+        return node.getAttribute('data-ink-display') === '1' ? `\n\n$$${tex}$$\n\n` : `$${tex}$`;
+      },
+    });
+
     // 丢掉空链接与锚点装饰
     td.addRule('emptyAnchor', {
       filter: (node) => node.nodeName === 'A' && !node.textContent.trim() && !node.querySelector('img'),
@@ -99,8 +112,46 @@ const InkMarkdown = {
     return td;
   },
 
+  /**
+   * 表格单元格扁平化：GFM 表格不允许单元格里出现块级结构，
+   * 这是导出表格「碎掉」的头号原因。把 <p>/<div>/<ul> 等压成 <br> 分隔的行内内容，
+   * <pre> 压成行内 <code>。
+   */
+  flattenTableCells(root) {
+    root.querySelectorAll('td, th').forEach((cell) => {
+      // 代码块 → 行内 code（换行折叠为空格）
+      cell.querySelectorAll('pre').forEach((pre) => {
+        const code = document.createElement('code');
+        code.textContent = pre.textContent.replace(/\s*\n\s*/g, ' ').trim();
+        pre.replaceWith(code);
+      });
+      // 嵌套表格 GFM 无法表达 → 压成文字
+      cell.querySelectorAll('table').forEach((t) => {
+        const span = document.createElement('span');
+        span.textContent = t.textContent.replace(/\s+/g, ' ').trim();
+        t.replaceWith(span);
+      });
+      const blocks = cell.querySelectorAll('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, blockquote');
+      if (!blocks.length) return;
+      const parts = [];
+      const walk = (node) => {
+        for (const child of Array.from(node.childNodes)) {
+          if (child.nodeType === 1 && /^(P|DIV|UL|OL|BLOCKQUOTE|H[1-6])$/.test(child.tagName)) {
+            walk(child);
+          } else if (child.nodeType === 1 && child.tagName === 'LI') {
+            parts.push('• ' + child.innerHTML.trim());
+          } else if (child.nodeType === 3 ? child.textContent.trim() : true) {
+            parts.push(child.nodeType === 3 ? child.textContent.trim() : child.outerHTML);
+          }
+        }
+      };
+      walk(cell);
+      cell.innerHTML = parts.filter(Boolean).join('<br>');
+    });
+  },
+
   /** YAML Front Matter */
-  buildFrontMatter(ir) {
+  buildFrontMatter(ir, opts) {
     const esc = (s) => String(s).replace(/"/g, '\\"');
     const lines = ['---'];
     lines.push(`title: "${esc(ir.title)}"`);
@@ -109,7 +160,9 @@ const InkMarkdown = {
     if (ir.siteName) lines.push(`site: "${esc(ir.siteName)}"`);
     if (ir.publishedTime) lines.push(`published: "${esc(ir.publishedTime)}"`);
     lines.push(`clipped: "${new Date().toISOString()}"`);
-    lines.push('tags: [clippings]');
+    const tags = String((opts && opts.frontMatterTags) || 'clippings')
+      .split(/[,，]/).map(t => t.trim()).filter(Boolean);
+    if (tags.length) lines.push(`tags: [${tags.join(', ')}]`);
     lines.push('---');
     return lines.join('\n');
   },
@@ -212,10 +265,15 @@ const InkMarkdown = {
       includeTitle: true,
     }, options);
 
-    const td = this.createTurndown();
+    if (ir.contentEl) this.flattenTableCells(ir.contentEl);
+    const td = this.createTurndown(opts);
     let body = td.turndown(ir.contentEl ? ir.contentEl.innerHTML : '');
-    // 收敛多余空行
-    body = body.replace(/\n{3,}/g, '\n\n').trim();
+    // 清理不可见字符（零宽空格/BOM/方向控制符）与 nbsp，收敛多余空行
+    body = body
+      .replace(/[\u200b\u200c\u200d\u200e\u200f\ufeff]/g, '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
     let appendixAnns = [];
     if (opts.includeComments && ir.annotations.length) {

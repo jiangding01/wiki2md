@@ -29,6 +29,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   state.tabId = tab.id;
 
+  // 内容脚本进度实时回显（图片抓取 / 飞书滚动采集）
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === 'INK_PROGRESS') {
+      const el = $('status-line');
+      el.textContent = msg.text;
+      el.classList.remove('err');
+    }
+  });
+
   try {
     const inject = await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: tab.id });
     if (!inject || !inject.ok) throw new Error((inject && inject.error) || '脚本注入失败');
@@ -38,12 +47,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+/** 向页面发消息，注入尚未就绪时自动重试一次 */
+async function sendToPage(payload) {
+  try {
+    return await chrome.tabs.sendMessage(state.tabId, payload);
+  } catch (e) {
+    if (/Receiving end does not exist/i.test(e.message || '')) {
+      await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: state.tabId });
+      await new Promise(r => setTimeout(r, 250));
+      return chrome.tabs.sendMessage(state.tabId, payload);
+    }
+    throw e;
+  }
+}
+
 async function analyze() {
   state.analyzing = true;
-  const res = await chrome.tabs.sendMessage(state.tabId, {
-    type: 'INK_ANALYZE',
-    options: { includeComments: $('opt-comments').checked },
-  });
+  $('state-ready').classList.add('hidden');
+  $('state-error').classList.add('hidden');
+  $('state-loading').classList.remove('hidden');
+  let res = null;
+  try {
+    res = await sendToPage({
+      type: 'INK_ANALYZE',
+      options: { includeComments: $('opt-comments').checked },
+    });
+  } catch (e) {
+    res = { ok: false, error: e.message };
+  }
   state.analyzing = false;
   if (!res || !res.ok) {
     return showError('页面分析失败', (res && res.error) || '内容脚本无响应');
@@ -122,15 +153,11 @@ async function doDownload() {
   try {
     if (state.imageStrategy === 'zip') {
       $('btn-download-label').textContent = '抓取图片中…';
-      const res = await chrome.tabs.sendMessage(state.tabId, {
-        type: 'INK_EXPORT', action: 'zip', options: exportOptions(),
-      });
+      const res = await sendToPage({ type: 'INK_EXPORT', action: 'zip', options: exportOptions() });
       if (!res.ok) throw new Error(res.error);
       status(`已打包 ${res.imageCount} 张图片` + (res.failedCount ? `（${res.failedCount} 张失败，保留远程链接）` : ''));
     } else {
-      const res = await chrome.tabs.sendMessage(state.tabId, {
-        type: 'INK_EXPORT', action: 'download', options: exportOptions(),
-      });
+      const res = await sendToPage({ type: 'INK_EXPORT', action: 'download', options: exportOptions() });
       if (!res.ok) throw new Error(res.error);
       status('已下载 ' + res.filename);
     }
@@ -144,8 +171,9 @@ async function doDownload() {
 
 async function doCopy() {
   try {
-    const res = await chrome.tabs.sendMessage(state.tabId, {
-      type: 'INK_EXPORT', action: 'markdown', options: exportOptions(),
+    const res = await sendToPage({
+      type: 'INK_EXPORT', action: 'markdown',
+      options: Object.assign(exportOptions(), { intent: 'copy' }),
     });
     if (!res.ok) throw new Error(res.error);
     await navigator.clipboard.writeText(res.markdown);
@@ -157,7 +185,7 @@ async function doCopy() {
 
 async function doPreview() {
   try {
-    const res = await chrome.tabs.sendMessage(state.tabId, {
+    const res = await sendToPage({
       type: 'INK_EXPORT', action: 'markdown', options: exportOptions(),
     });
     if (!res.ok) throw new Error(res.error);
@@ -179,6 +207,16 @@ function bindEvents() {
   $('btn-preview').addEventListener('click', doPreview);
   $('btn-settings').addEventListener('click', () => {
     if (IS_EXTENSION) chrome.runtime.openOptionsPage();
+  });
+  $('btn-reanalyze').addEventListener('click', (e) => {
+    e.preventDefault();
+    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze();
+  });
+  $('link-batch').addEventListener('click', () => {
+    if (IS_EXTENSION) chrome.tabs.create({ url: chrome.runtime.getURL('src/batch/batch.html') });
+  });
+  $('link-history').addEventListener('click', () => {
+    if (IS_EXTENSION) chrome.tabs.create({ url: chrome.runtime.getURL('src/options/options.html#history') });
   });
 
   document.querySelectorAll('.seg-btn').forEach((btn) => {

@@ -112,6 +112,8 @@ body {
   transition: color .15s, background .15s, transform .3s;
 }
 .icon-btn:hover { color: var(--ink); background: var(--paper-sunken); transform: rotate(30deg); }
+.icon-btn-sm { padding: 3px; margin-left: auto; }
+.icon-btn-sm:hover { transform: rotate(180deg); color: var(--cinnabar); }
 
 /* ---------- 状态区 ---------- */
 
@@ -338,6 +340,17 @@ body {
   border-top: 1px solid var(--paper-line);
   text-align: center;
 }
+.footer-links { margin-bottom: 6px; }
+.footer-link {
+  border: none; background: none;
+  font-size: 11px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 5px;
+}
+.footer-link:hover { color: var(--cinnabar); background: var(--cinnabar-mist); }
+.footer-dot { color: var(--ink-faint); font-size: 11px; }
 .footer-tip { font-size: 10px; color: var(--ink-faint); }
 .footer-tip kbd {
   font-family: var(--font-mono);
