@@ -407,7 +407,8 @@ var InkMarkdown = window.InkMarkdown || {
   },
 
   /** 脚注体：首行评论，回复逐行缩进（4 空格续行是多行脚注语法，Obsidian/Typora/GFM 通用）。
-   *  此前回复用「↳」串在同一行，长回复链完全没有层级可读性。 */
+   *  行尾两个空格是硬换行——没有它，段落内换行会被渲染器合并回一行（软换行），
+   *  回复链就又挤成一坨（真机反馈两轮才踩全的坑）。 */
   _formatAnnotationBody(ann) {
     const meta = [ann.author, ann.time].filter(Boolean).join(' · ');
     let body = ann.content.replace(/\n+/g, ' ').trim();
@@ -417,7 +418,7 @@ var InkMarkdown = window.InkMarkdown || {
       const rMeta = [r.author, r.time].filter(Boolean).join(' · ');
       lines.push(`↳ ${rMeta ? `**${rMeta}**：` : ''}${r.content.replace(/\n+/g, ' ').trim()}`);
     }
-    return lines.join('\n    ');
+    return lines.join('  \n    ');
   },
 
   /** 页面评论 + 无锚点的划线评论 → 文末评论区 */
