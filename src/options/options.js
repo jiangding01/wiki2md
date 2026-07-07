@@ -88,17 +88,36 @@ function addRuleCard(rule) {
   node.querySelector('.r-title').value = r.titleSel || '';
   node.querySelector('.r-remove').value = r.removeSel || '';
   node.querySelector('.rule-del').addEventListener('click', () => node.remove());
+  // 用户开始补填时立刻撤掉红色警示
+  node.addEventListener('input', () => node.classList.remove('invalid'));
   $('rules-list').appendChild(node);
 }
 
+/**
+ * 收集规则并校验。半填的规则绝不静默丢弃——高亮标出、保留在界面上，
+ * 并通过返回值告知调用方给出提示。完全空白的卡片视为用户放弃，忽略。
+ */
 function collectRules() {
-  return Array.from(document.querySelectorAll('.rule-card')).map((card) => ({
-    name: card.querySelector('.r-name').value.trim(),
-    match: card.querySelector('.r-match').value.trim(),
-    contentSel: card.querySelector('.r-content').value.trim(),
-    titleSel: card.querySelector('.r-title').value.trim(),
-    removeSel: card.querySelector('.r-remove').value.trim(),
-  })).filter(r => r.match && r.contentSel); // 必填项缺失的规则直接丢弃
+  const valid = [];
+  let invalidCount = 0;
+  document.querySelectorAll('.rule-card').forEach((card) => {
+    const rule = {
+      name: card.querySelector('.r-name').value.trim(),
+      match: card.querySelector('.r-match').value.trim(),
+      contentSel: card.querySelector('.r-content').value.trim(),
+      titleSel: card.querySelector('.r-title').value.trim(),
+      removeSel: card.querySelector('.r-remove').value.trim(),
+    };
+    const filledAny = Object.values(rule).some(Boolean);
+    const complete = rule.match && rule.contentSel;
+    card.classList.toggle('invalid', filledAny && !complete);
+    if (complete) {
+      valid.push(rule);
+    } else if (filledAny) {
+      invalidCount += 1;
+    }
+  });
+  return { valid, invalidCount };
 }
 
 /* ---------- 历史 ---------- */
@@ -227,6 +246,7 @@ async function importConfig(e) {
 /* ---------- 保存 ---------- */
 
 async function save() {
+  const rules = collectRules();
   const settings = {
     frontMatter: $('frontMatter').checked,
     frontMatterTags: $('frontMatterTags').value.trim() || 'clippings',
@@ -242,10 +262,16 @@ async function save() {
     complexTable: $('complexTable').value,
     highlightAnchors: $('highlightAnchors').checked,
     keepHistory: $('keepHistory').checked,
-    customRules: collectRules(),
+    customRules: rules.valid,
   };
   await chrome.storage.sync.set({ inkmarkSettings: settings });
   const el = $('save-status');
-  el.textContent = '已保存 ✓';
-  setTimeout(() => { el.textContent = ''; }, 2000);
+  if (rules.invalidCount > 0) {
+    el.textContent = `已保存，但有 ${rules.invalidCount} 条规则缺少必填项（URL 包含 / 正文选择器）未生效`;
+    switchTab('rules');
+    setTimeout(() => { el.textContent = ''; }, 6000);
+  } else {
+    el.textContent = '已保存 ✓';
+    setTimeout(() => { el.textContent = ''; }, 2000);
+  }
 }

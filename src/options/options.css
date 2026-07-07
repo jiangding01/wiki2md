@@ -179,6 +179,7 @@ label.row { cursor: pointer; }
 }
 .rule-grid .input { width: 100%; }
 .rule-wide { grid-column: 1 / -1; }
+.rule-card.invalid { border-color: var(--cinnabar); }
 .rule-del {
   position: absolute; top: 10px; right: 10px;
   border: none; background: none;

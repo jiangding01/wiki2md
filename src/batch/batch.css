@@ -109,6 +109,14 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
   font-family: var(--font-mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.tab-tag {
+  flex: none;
+  font-size: 10px;
+  color: var(--ink-faint);
+  border: 1px solid var(--paper-line);
+  border-radius: 99px;
+  padding: 1px 7px;
+}
 .tab-state { flex: none; font-size: 13px; width: 60px; text-align: right; }
 .tab-state.ok { color: var(--jade); }
 .tab-state.err { color: var(--cinnabar); }

@@ -47,6 +47,7 @@ async function showPicker() {
         <span class="tab-title"></span>
         <span class="tab-url"></span>
       </span>
+      ${tab.discarded ? '<span class="tab-tag" title="导出时会自动唤醒并等待加载">休眠</span>' : ''}
       <span class="tab-state" id="state-${i}"></span>`;
     row.querySelector('.tab-title').textContent = tab.title || '(无标题)';
     row.querySelector('.tab-url').textContent = tab.url;
@@ -79,6 +80,28 @@ function setState(i, text, cls) {
   el.className = 'tab-state ' + (cls || '');
 }
 
+/**
+ * 休眠（discarded）标签页无法注入脚本——批量导出的核心人群恰恰开着
+ * 几十个休眠标签页。导出前自动唤醒并等待加载完成（15s 兜底）。
+ */
+async function ensureAwake(tab) {
+  const fresh = await chrome.tabs.get(tab.id);
+  if (!fresh.discarded && fresh.status === 'complete') return;
+  if (fresh.discarded) await chrome.tabs.reload(tab.id).catch(() => {});
+  await new Promise((resolve) => {
+    const timer = setTimeout(finish, 15000);
+    function finish() {
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      resolve();
+    }
+    function listener(id, info) {
+      if (id === tab.id && info.status === 'complete') finish();
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
 async function exportSelected() {
   const picked = selectedIndexes();
   const btn = $('btn-export');
@@ -94,6 +117,7 @@ async function exportSelected() {
     $('batch-status').textContent = `处理中 ${k + 1}/${picked.length}…`;
     setState(i, '…', 'busy');
     try {
+      await ensureAwake(tab);
       await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: tab.id })
         .then((r) => { if (!r || !r.ok) throw new Error((r && r.error) || '注入失败'); });
       const res = await chrome.tabs.sendMessage(tab.id, {

@@ -254,6 +254,23 @@ async function runPipeline(page, fixture, options) {
 
   await browser.close();
 
+  /* ---------- 用例 10：注入清单一致性（防「忘记注册新文件」类回归） ---------- */
+  console.log('\n[10] 注入清单 · background 与测试/磁盘三方一致');
+  {
+    const bg = fs.readFileSync(path.join(ROOT, 'src/background/background.js'), 'utf8');
+    const m = bg.match(/const CONTENT_FILES = \[([\s\S]*?)\];/);
+    const bgFiles = m ? Array.from(m[1].matchAll(/'([^']+)'/g)).map(x => x[1]) : [];
+    assert(bgFiles.length > 0, '能从 background.js 解析出 CONTENT_FILES');
+    assert(JSON.stringify(bgFiles) === JSON.stringify(CONTENT_FILES),
+      'background 注入清单与测试清单一致',
+      `bg=${JSON.stringify(bgFiles)}\n    test=${JSON.stringify(CONTENT_FILES)}`);
+    const missing = bgFiles.filter(f => !fs.existsSync(path.join(ROOT, f)));
+    assert(missing.length === 0, '清单内文件全部存在于磁盘', missing.join(', '));
+    const adapterFiles = fs.readdirSync(path.join(ROOT, 'src/adapters')).map(f => 'src/adapters/' + f);
+    const unregistered = adapterFiles.filter(f => !bgFiles.includes(f));
+    assert(unregistered.length === 0, '所有适配器文件都已注册进注入清单', unregistered.join(', '));
+  }
+
   console.log('\n' + (failures === 0 ? '✅ 全部通过' : `❌ ${failures} 项失败`));
   process.exit(failures === 0 ? 0 : 1);
 })();

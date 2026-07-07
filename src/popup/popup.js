@@ -29,12 +29,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   state.tabId = tab.id;
 
-  // 内容脚本进度实时回显（图片抓取 / 飞书滚动采集）
+  // 内容脚本进度实时回显（图片抓取 / 飞书滚动采集）。
+  // 分析阶段界面停在加载态，进度必须写到加载文案上，否则用户以为卡死了。
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === 'INK_PROGRESS') {
-      const el = $('status-line');
-      el.textContent = msg.text;
-      el.classList.remove('err');
+      if (!$('state-loading').classList.contains('hidden')) {
+        $('loading-text').textContent = msg.text;
+      } else {
+        const el = $('status-line');
+        el.textContent = msg.text;
+        el.classList.remove('err');
+      }
     }
   });
 
@@ -47,7 +52,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       showError('无法访问本地文件页面',
         '请在 chrome://extensions → 摘墨 → 详情 中开启「允许访问文件网址」后重试');
     } else {
-      showError('页面分析失败', e.message);
+      showError('页面分析失败', friendlyError(e.message));
     }
   }
 });
@@ -75,11 +80,27 @@ async function sendToPage(payload) {
   }
 }
 
+/** 把 Chrome 的原始报错翻译成用户能行动的话 */
+function friendlyError(msg) {
+  const m = String(msg || '');
+  if (/Receiving end does not exist|Could not establish connection/i.test(m)) {
+    return '页面尚未就绪，请刷新页面后重试';
+  }
+  if (/Cannot access contents|cannot be scripted|The extensions gallery/i.test(m)) {
+    return '浏览器限制：此页面不允许扩展访问（应用商店、系统页面等）';
+  }
+  if (/No tab with id/i.test(m)) {
+    return '标签页已关闭';
+  }
+  return m || '未知错误';
+}
+
 async function analyze() {
   state.analyzing = true;
   $('state-ready').classList.add('hidden');
   $('state-error').classList.add('hidden');
   $('state-loading').classList.remove('hidden');
+  $('loading-text').textContent = '正在研墨，分析页面…';
   let res = null;
   try {
     res = await sendToPage({
@@ -91,7 +112,7 @@ async function analyze() {
   }
   state.analyzing = false;
   if (!res || !res.ok) {
-    return showError('页面分析失败', (res && res.error) || '内容脚本无响应');
+    return showError('页面分析失败', friendlyError(res && res.error));
   }
   renderAnalysis(res);
 }
@@ -153,12 +174,16 @@ function status(msg, isError) {
 
 /* ---------- 导出动作 ---------- */
 
+/**
+ * 只传 popup 明确控制的字段。其余设置由 pipeline 从 storage 实时读取——
+ * 若把打开时的设置快照整包传过去，用户中途在设置页做的修改会被旧快照覆盖。
+ */
 function exportOptions() {
-  return Object.assign({}, state.settings, {
+  return {
     frontMatter: $('opt-frontmatter').checked,
     includeComments: $('opt-comments').checked,
     title: $('doc-title').value,
-  });
+  };
 }
 
 async function doDownload() {
