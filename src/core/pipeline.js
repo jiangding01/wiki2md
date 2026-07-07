@@ -210,13 +210,33 @@
     const zip = new JSZip();
     const renderOpts = Object.assign({}, settings, { includeComments: false });
     const used = new Set();
-    for (const n of nodes) {
+    let imageCount = 0;
+    let imageFailed = 0;
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
       const dir = n.path.map(safe).join('/');
       let name = safe(n.title);
       let full = (dir ? dir + '/' : '') + name + '.md';
       for (let k = 2; used.has(full); k++) full = (dir ? dir + '/' : '') + `${name}-${k}.md`;
       used.add(full);
-      zip.file(full, InkMarkdown.render(n.ir, renderOpts));
+
+      let md = InkMarkdown.render(n.ir, renderOpts);
+      // 页面树的使用场景就是 Confluence——图片全部需要登录态，
+      // 远程链接在本地必然裂图，所以每一页都做图片本地化：
+      // 图片放进与 md 同级的「<文件名>.assets/」目录，相对引用，解压即可离线阅读。
+      const fileBase = full.slice(full.lastIndexOf('/') + 1, -3);
+      progress(`图片本地化 ${i + 1}/${nodes.length}：${n.title}`);
+      const localized = await InkExporter.localizeImages(md, null, `${fileBase}.assets`);
+      md = localized.markdown;
+      imageCount += localized.files.size;
+      imageFailed += localized.failed.length;
+      for (const [assetPath, blob] of localized.files) {
+        zip.file((dir ? dir + '/' : '') + assetPath, blob);
+      }
+      if (localized.failed.length) {
+        failures.push(`「${n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
+      }
+      zip.file(full, md);
     }
     if (failures.length) {
       zip.file('导出报告.md',
@@ -225,7 +245,7 @@
     }
     const blob = await zip.generateAsync({ type: 'blob' });
     InkExporter.downloadBlob(blob, InkExporter.buildFilename('{title}-页面树', rootIR, 'zip'));
-    return { ok: true, pages: nodes.length, failed: failures.length };
+    return { ok: true, pages: nodes.length, failed: failures.length, images: imageCount, imageFailed };
   }
 
   async function handleExportSelection(options) {

@@ -346,8 +346,12 @@ async function runPipeline(page, fixture, options) {
         if (url.includes('/content/200/child/page')) return json({ results: [{ id: '300', title: '孙页面B' }, { id: '400', title: '坏页面C' }] });
         if (url.includes('/content/300/child/page') || url.includes('/content/400/child/page')) return json({ results: [] });
         if (url.includes('/content/200?expand')) return json({ title: '子页面A', body: { export_view: { value: '<p>A 的内容</p>' } } });
-        if (url.includes('/content/300?expand')) return json({ title: '孙页面B', body: { export_view: { value: '<h2>小节</h2><p>B 的正文</p>' } } });
+        if (url.includes('/content/300?expand')) return json({ title: '孙页面B', body: { export_view: {
+          value: '<h2>小节</h2><p>B 的正文</p><p><img src="https://wiki.example.com/download/attachments/300/b-img.png?api=v2&amp;x=1"></p>' } } });
         if (url.includes('/content/400?expand')) return Promise.resolve({ ok: false, status: 500 });
+        if (url.includes('b-img.png')) {
+          return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['x'], { type: 'image/png' })) });
+        }
         return Promise.resolve({ ok: false, status: 404 });
       };
       // 拦截 ZIP 下载
@@ -372,6 +376,11 @@ async function runPipeline(page, fixture, options) {
     assert(tree.res.failed === 1 && tree.report.includes('坏页面C'),
       '失败页面进入 ZIP 内导出报告，不静默丢失', tree.report);
     assert(tree.filename.includes('页面树') && tree.filename.endsWith('.zip'), 'ZIP 文件名含标识');
+    assert(tree.res.images === 1 &&
+           tree.files.includes('支付网关重构方案/子页面A/孙页面B.assets/img-001.png'),
+      '子页面图片本地化进「页面名.assets/」目录', tree.files.join(', '));
+    assert(tree.bContent.includes('](孙页面B.assets/img-001.png)'),
+      'md 内图片改为相对引用，解压即可离线查看', tree.bContent);
   }
 
   /* ---------- 用例 14：图片本地化覆盖 HTML 块 & 鉴权站点标记 ---------- */

@@ -42,7 +42,7 @@ var InkExporter = window.InkExporter || {
    * 并发 4 路，单张 20s 超时；data: URI 同样落盘（fetch 原生支持）。
    * 返回 { markdown, files: Map<path, Blob>, failed: string[] }
    */
-  async localizeImages(markdown, onProgress) {
+  async localizeImages(markdown, onProgress, assetDir) {
     // 收集两类图片引用：
     //   1) Markdown 形式 ![alt](url)
     //   2) HTML 块中的 <img src="...">（复杂表格直通会产生；Confluence 单元格里嵌图极常见）
@@ -76,7 +76,7 @@ var InkExporter = window.InkExporter || {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         const ext = this._extFromType(blob.type) || this._extFromUrl(url) || 'png';
-        const path = `assets/img-${String(idx + 1).padStart(3, '0')}.${ext}`;
+        const path = `${assetDir || 'assets'}/img-${String(idx + 1).padStart(3, '0')}.${ext}`;
         files.set(path, blob);
         rename.set(url, path);
       } catch (e) {

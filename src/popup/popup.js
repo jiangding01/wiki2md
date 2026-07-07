@@ -266,7 +266,8 @@ async function doExportTree() {
   try {
     const res = await sendToPage({ type: 'INK_EXPORT_TREE', options: exportOptions() });
     if (!res.ok) throw new Error(res.error);
-    status(`已导出 ${res.pages} 页` + (res.failed ? `（${res.failed} 项失败，详见 ZIP 内导出报告）` : ''));
+    status(`已导出 ${res.pages} 页、${res.images || 0} 张图片` +
+      (res.failed ? `（${res.failed} 项异常，详见 ZIP 内导出报告）` : ''));
   } catch (e) {
     status('页面树导出失败：' + e.message, true);
   } finally {
