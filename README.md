@@ -22,7 +22,7 @@
 ## 功能
 
 - 🌐 **任意网页**：Readability 正文提取兜底，没有专门适配的网站也能导出
-- 🎯 **站点精配**：Confluence（含评论）、飞书文档（实验性）、微信公众号、知乎、掘金、CSDN、语雀、Stack Overflow（问题 + 全部回答结构化导出）
+- 🎯 **站点精配**：Confluence（含评论）、飞书文档（数据接口精配，失败自动回退滚动采集）、微信公众号、知乎、掘金、CSDN、语雀、Stack Overflow（问题 + 全部回答结构化导出）
 - 🛠 **自定义站点规则**：不写代码，填「URL 包含 + 正文选择器」即可精配任何站点（内网系统友好），优先级高于内置适配器，失配自动回退
 - 💬 **评论导出**：划线评论锚定为脚注 `[^1]`，页面评论汇入文末「💬 评论」区，回复嵌套呈现，自动分页拉全
 - 🧮 **公式还原**：KaTeX / MathJax / 知乎公式图 → `$LaTeX$` 源码
@@ -70,7 +70,7 @@
 
 ```bash
 npm install playwright          # 测试依赖（仅本地）
-node test/e2e.js                # 真实 Chromium 中跑全管线断言（85 项）
+node test/e2e.js                # 真实 Chromium 中跑全管线断言（111 项）
 # 使用系统已有浏览器：CHROMIUM_PATH=/path/to/chrome node test/e2e.js
 ```
 
