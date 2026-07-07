@@ -132,7 +132,7 @@ async function renderHistory() {
     const meta = document.createElement('div');
     meta.className = 'history-meta';
     meta.innerHTML =
-      `<span class="h-adapter">${escapeHtml(entry.adapter || '')}</span> · ` +
+      `<span class="h-adapter">${InkUI.escapeHtml(entry.adapter || '')}</span> · ` +
       `${new Date(entry.ts).toLocaleString()} · ${ACTION_LABEL[entry.action] || entry.action} · ` +
       `${(entry.chars / 1000).toFixed(1)}k 字符` +
       (entry.markdown ? '' : ' · <em>正文未保留</em>');
@@ -148,13 +148,9 @@ async function renderHistory() {
         setTimeout(() => { btn.textContent = '复制'; }, 1200);
       }));
       actions.appendChild(miniBtn('下载', () => {
-        const blob = new Blob([entry.markdown], { type: 'text/markdown;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = entry.filename || 'untitled.md';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        InkUI.downloadBlob(
+          new Blob([entry.markdown], { type: 'text/markdown;charset=utf-8' }),
+          entry.filename || 'untitled.md');
       }));
     }
     actions.appendChild(miniBtn('原文', () => { window.open(entry.url, '_blank'); }));
@@ -173,10 +169,6 @@ function miniBtn(text, onClick) {
   return b;
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
 /* ---------- 配置导入 / 导出 ---------- */
 
 async function exportConfig() {
@@ -186,13 +178,9 @@ async function exportConfig() {
     exportedAt: new Date().toISOString(),
     settings: Object.assign({}, DEFAULTS, await readSettings()),
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'inkmark-settings.json';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  InkUI.downloadBlob(
+    new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+    'inkmark-settings.json');
 }
 
 async function importConfig(e) {

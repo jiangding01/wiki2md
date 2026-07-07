@@ -160,6 +160,20 @@
    */
   const TREE_MAX_PAGES = 300;
 
+  /** 简单并发池：保持结果与输入顺序一致（zip 目录顺序确定性依赖它） */
+  async function mapPool(items, limit, fn) {
+    const out = new Array(items.length);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (cursor < items.length) {
+        const idx = cursor++;
+        out[idx] = await fn(items[idx], idx);
+      }
+    });
+    await Promise.all(workers);
+    return out;
+  }
+
   async function handleExportTree(options) {
     const settings = await loadSettings(options);
     window.__inkCustomRules = settings.customRules || [];
@@ -193,59 +207,77 @@
         failures.push(`页面 ${cur.id} 的子页面列表拉取失败：${e.message}`);
         continue;
       }
-      for (const child of children) {
-        if (fetched >= TREE_MAX_PAGES) {
-          failures.push(`超出 ${TREE_MAX_PAGES} 页安全上限，「${child.title}」及之后的页面未导出`);
-          queue.length = 0;
-          break;
-        }
-        fetched += 1;
-        progress(`抓取第 ${fetched} 页：${child.title}`);
+      const capacity = TREE_MAX_PAGES - fetched;
+      if (children.length > capacity) {
+        failures.push(`超出 ${TREE_MAX_PAGES} 页安全上限，「${children[capacity] ? children[capacity].title : ''}」及之后的页面未导出`);
+        children = children.slice(0, capacity);
+        queue.length = 0;
+      }
+      fetched += children.length;
+      // 同层子页面 3 路并发抓取（串行时大空间导出被 RTT 主导），结果保持原顺序
+      const results = await mapPool(children, 3, async (child) => {
+        progress(`抓取页面：${child.title}`);
         try {
-          const meta = await adapter.fetchPageHtml(child.id);
-          const url = `${base}/pages/viewpage.action?pageId=${child.id}`;
-          nodes.push({ ir: adapter.htmlToIR(meta, url), path: cur.path, title: meta.title });
-          queue.push({ id: child.id, path: cur.path.concat(meta.title) });
+          return { child, meta: await adapter.fetchPageHtml(child.id) };
         } catch (e) {
-          failures.push(`「${child.title || child.id}」抓取失败：${e.message}`);
+          return { child, error: e };
         }
+      });
+      for (const r of results) {
+        if (r.error) {
+          failures.push(`「${r.child.title || r.child.id}」抓取失败：${r.error.message}`);
+          continue;
+        }
+        const url = `${base}/pages/viewpage.action?pageId=${r.child.id}`;
+        nodes.push({ ir: adapter.htmlToIR(r.meta, url), path: cur.path, title: r.meta.title });
+        queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });
       }
     }
 
     progress('正在转换并打包…');
     const zip = new JSZip();
     const renderOpts = Object.assign({}, settings, { includeComments: false });
+
+    // 第一步（顺序）：分配文件名（去重必须有序）并完成 md 渲染。
+    // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
+    // 目录列表不被「每篇 md 一个长名文件夹」翻倍，配对关系仍一眼可见，
+    // 单独移动某篇 md 时带走 assets/<同名>/ 即可。
     const used = new Set();
-    let imageCount = 0;
-    let imageFailed = 0;
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
+    const entries = nodes.map((n) => {
       const dir = n.path.map(safe).join('/');
-      let name = safe(n.title);
+      const name = safe(n.title);
       let full = (dir ? dir + '/' : '') + name + '.md';
       for (let k = 2; used.has(full); k++) full = (dir ? dir + '/' : '') + `${name}-${k}.md`;
       used.add(full);
-
-      let md = InkMarkdown.render(n.ir, renderOpts);
-      // 页面树的使用场景就是 Confluence——图片全部需要登录态，
-      // 远程链接在本地必然裂图，所以每一页都做图片本地化。
-      // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
-      // 目录列表不被「每篇 md 一个长名文件夹」翻倍，配对关系仍一眼可见，
-      // 单独移动某篇 md 时带走 assets/<同名>/ 即可。
       const fileBase = full.slice(full.lastIndexOf('/') + 1, -3);
-      progress(`图片本地化 ${i + 1}/${nodes.length}：${n.title}`);
-      const localized = await InkExporter.localizeImages(md, null, `assets/${fileBase}`);
-      md = localized.markdown;
+      return { n, dir, full, fileBase, md: InkMarkdown.render(n.ir, renderOpts) };
+    });
+
+    // 第二步（3 路并发）：逐页图片本地化。页面树的使用场景就是 Confluence——
+    // 图片全部需要登录态，远程链接在本地必然裂图。
+    let localizedDone = 0;
+    let imageCount = 0;
+    let imageFailed = 0;
+    const localizedList = await mapPool(entries, 3, async (entry) => {
+      const localized = await InkExporter.localizeImages(entry.md, null, `assets/${entry.fileBase}`);
+      localizedDone += 1;
+      progress(`图片本地化 ${localizedDone}/${entries.length}：${entry.n.title}`);
+      return localized;
+    });
+
+    // 第三步（顺序）：写入 zip 与失败账目
+    entries.forEach((entry, i) => {
+      const localized = localizedList[i];
       imageCount += localized.files.size;
       imageFailed += localized.failed.length;
       for (const [assetPath, blob] of localized.files) {
-        zip.file((dir ? dir + '/' : '') + assetPath, blob);
+        zip.file((entry.dir ? entry.dir + '/' : '') + assetPath, blob);
       }
       if (localized.failed.length) {
-        failures.push(`「${n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
+        failures.push(`「${entry.n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
       }
-      zip.file(full, md);
-    }
+      zip.file(entry.full, localized.markdown);
+    });
     if (failures.length) {
       zip.file('导出报告.md',
         `# 页面树导出报告\n\n成功导出 ${nodes.length} 页。以下 ${failures.length} 项失败：\n\n` +

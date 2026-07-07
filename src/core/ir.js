@@ -114,6 +114,38 @@ var InkIR = window.InkIR || {
   },
 
   /**
+   * 选择器型适配器的标准提取序列：克隆 → 懒加载修复 → 噪音清理 → URL 绝对化。
+   * 顺序是隐性契约：fixLazyImages 必须先于 absolutizeUrls，
+   * 否则 data-src 里的相对路径不会被绝对化。所有适配器统一走这里，不再各自手拼。
+   */
+  buildContainer(sourceEl, extraNoise, baseUrl) {
+    const container = document.createElement('div');
+    container.appendChild(this.detach(sourceEl));
+    this.fixLazyImages(container);
+    this.removeNoise(container, extraNoise);
+    this.absolutizeUrls(container, baseUrl);
+    return container;
+  },
+
+  /** 标题兜底链：选择器命中非空文本即用，否则 document.title（可剥站点后缀） */
+  pickTitle(selector, stripSuffixRe) {
+    if (selector) {
+      const el = document.querySelector(selector);
+      if (el && el.textContent.trim()) return el.textContent.trim();
+    }
+    let t = document.title || '未命名文档';
+    if (stripSuffixRe) t = t.replace(stripSuffixRe, '').trim();
+    return t || '未命名文档';
+  },
+
+  /** 可选文本读取：命中且非空返回 trim 后文本，否则 null */
+  pickText(selector) {
+    const el = selector ? document.querySelector(selector) : null;
+    const t = el && el.textContent ? el.textContent.trim() : '';
+    return t || null;
+  },
+
+  /**
    * 规范化标注框（callout / admonition）。
    * 适配器把平台特有的提示面板改写成统一结构：
    *   <div data-ink-callout="info|note|warning|error|success" data-ink-title="...">正文</div>
@@ -167,16 +199,37 @@ var InkIR = window.InkIR || {
     }
   },
 
-  /** 统计信息，popup 用来展示 */
+  /** 统计信息，popup 用来展示。
+   *  字数单趟按码位计数（CJK 每字一词、英数下划线连串一词）——
+   *  正则 match 会为百万字文档物化百万个单字符字符串，这里零中间分配。 */
   stats(ir) {
     const root = ir.contentEl;
-    const text = root ? (root.textContent || '') : '';
+    let words = 0;
+    if (root) {
+      const text = root.textContent || '';
+      let inWord = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        if (c >= 0x4e00 && c <= 0x9fa5) {
+          words += 1;
+          inWord = false;
+        } else if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95) {
+          if (!inWord) { words += 1; inWord = true; }
+        } else {
+          inWord = false;
+        }
+      }
+    }
+    let images = 0, tables = 0, codeBlocks = 0;
+    if (root) {
+      root.querySelectorAll('img, table, pre').forEach((el) => {
+        if (el.tagName === 'IMG') images += 1;
+        else if (el.tagName === 'TABLE') tables += 1;
+        else codeBlocks += 1;
+      });
+    }
     return {
-      words: (text.match(/[一-龥]/g) || []).length +
-             (text.replace(/[一-龥]/g, ' ').match(/[a-zA-Z0-9_]+/g) || []).length,
-      images: root ? root.querySelectorAll('img').length : 0,
-      tables: root ? root.querySelectorAll('table').length : 0,
-      codeBlocks: root ? root.querySelectorAll('pre').length : 0,
+      words, images, tables, codeBlocks,
       comments: ir.annotations.length +
                 ir.annotations.reduce((n, a) => n + a.replies.length, 0),
     };

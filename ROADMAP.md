@@ -33,10 +33,10 @@
 | 事项 | 说明 |
 | --- | --- |
 | ~~设置读写收敛为 core/settings.js~~ | ✅ 已完成：InkSettings 单一实现（DEFAULTS/read/write/update/reset），pipeline/popup/options/background 四处统一接入 |
-| 适配器提取样板下沉 | 六个选择器型适配器重复同一套 detach→fixLazy→removeNoise→absolutize 序列与标题兜底，应抽 InkIR 组合层 |
-| 界面页共享工具 | escapeHtml、下载 blob 样板、设计 token CSS 在 4 个界面页各有副本，已有变量漂移 |
-| 页面树导出并行化 | BFS 抓页与逐页图片本地化目前串行，大空间导出耗时被 RTT 主导 |
-| stats() 大文档性能 | 百万字级文档的字数统计产生大量临时分配，可改单趟 codePoint 计数 |
+| ~~适配器提取样板下沉~~ | ✅ 已完成：InkIR.buildContainer / pickTitle / pickText，七个适配器统一接入，顺序不一致隐患消除 |
+| ~~界面页共享工具~~ | ✅ 已完成：ui/tokens.css（设计 token 唯一定义）+ ui/shared.js（escapeHtml/downloadBlob），四页接入，escapeHtml 顺带补齐单引号转义 |
+| ~~页面树导出并行化~~ | ✅ 已完成：同层子页面 3 路并发抓取 + 图片本地化 3 路并发，文件名分配保持有序确定性 |
+| ~~stats() 大文档性能~~ | ✅ 已完成：单趟码位计数零中间分配，三次选择器查询合一 |
 
 ## 已完成（v1.0.0 交付）
 

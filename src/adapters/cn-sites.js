@@ -18,21 +18,14 @@ var WechatAdapter = window.WechatAdapter || {
     const source = document.querySelector('#js_content');
     if (!source) return GenericAdapter.extract();
 
-    const container = document.createElement('div');
-    container.appendChild(InkIR.detach(source));
-
-    InkIR.fixLazyImages(container); // 公众号图片全是 data-src 懒加载
-    InkIR.removeNoise(container, ['mpvoice', 'mp-common-profile', 'qqmusic']);
-    InkIR.absolutizeUrls(container);
-
-    const titleEl = document.querySelector('#activity-name, h1.rich_media_title');
-    const authorEl = document.querySelector('#js_name, .rich_media_meta_nickname');
+    // 公众号图片全是 data-src 懒加载，buildContainer 的标准序列已覆盖
+    const container = InkIR.buildContainer(source, ['mpvoice', 'mp-common-profile', 'qqmusic']);
 
     return InkIR.create({
-      title: titleEl ? titleEl.textContent.trim() : document.title,
-      byline: authorEl ? authorEl.textContent.trim() : null,
+      title: InkIR.pickTitle('#activity-name, h1.rich_media_title'),
+      byline: InkIR.pickText('#js_name, .rich_media_meta_nickname'),
       siteName: '微信公众号',
-      publishedTime: (document.querySelector('#publish_time') || {}).textContent || null,
+      publishedTime: InkIR.pickText('#publish_time'),
       contentEl: container,
     });
   },
@@ -57,10 +50,8 @@ var ZhihuAdapter = window.ZhihuAdapter || {
       : document.querySelector('.QuestionAnswer-content .RichText, .AnswerCard .RichText');
     if (!source) return GenericAdapter.extract();
 
-    const container = document.createElement('div');
-    container.appendChild(InkIR.detach(source));
-    InkIR.fixLazyImages(container);
-    InkIR.removeNoise(container, ['.RichText-LinkCardContainer button', '.ZVideoLinkCard-triggerButton']);
+    const container = InkIR.buildContainer(source,
+      ['.RichText-LinkCardContainer button', '.ZVideoLinkCard-triggerButton']);
     // 知乎公式图片：alt 里是 LaTeX，转成 data-ink-math 标记（转换层原样输出 $..$）
     container.querySelectorAll('img.ztext-math, img[eeimg="1"]').forEach((img) => {
       const tex = img.getAttribute('alt');
@@ -72,13 +63,10 @@ var ZhihuAdapter = window.ZhihuAdapter || {
         img.replaceWith(span);
       }
     });
-    InkIR.absolutizeUrls(container);
 
-    const titleEl = document.querySelector('.Post-Title, .QuestionHeader-title');
     const authorEl = document.querySelector('.AuthorInfo-name .UserLink-link, .AuthorInfo meta[itemprop="name"]');
-
     return InkIR.create({
-      title: titleEl ? titleEl.textContent.trim() : document.title,
+      title: InkIR.pickTitle('.Post-Title, .QuestionHeader-title'),
       byline: authorEl
         ? (authorEl.getAttribute('content') || authorEl.textContent.trim())
         : null,
@@ -103,19 +91,13 @@ var JuejinAdapter = window.JuejinAdapter || {
     const source = document.querySelector('#article-root .markdown-body, .article-viewer.markdown-body');
     if (!source) return GenericAdapter.extract();
 
-    const container = document.createElement('div');
-    container.appendChild(InkIR.detach(source));
-    InkIR.fixLazyImages(container);
-    InkIR.removeNoise(container, ['.copy-code-btn', '.code-block-extension-header', 'style']);
-    // 掘金代码块：<pre><code class="hljs language-go">
-    InkIR.absolutizeUrls(container);
-
-    const titleEl = document.querySelector('h1.article-title');
-    const authorEl = document.querySelector('.author-info-block .username, .author-name .name');
+    // 掘金代码块 <pre><code class="hljs language-go"> 由转换层统一识别语言
+    const container = InkIR.buildContainer(source,
+      ['.copy-code-btn', '.code-block-extension-header', 'style']);
 
     return InkIR.create({
-      title: titleEl ? titleEl.textContent.trim() : document.title,
-      byline: authorEl ? authorEl.textContent.trim() : null,
+      title: InkIR.pickTitle('h1.article-title'),
+      byline: InkIR.pickText('.author-info-block .username, .author-name .name'),
       siteName: '掘金',
       publishedTime: (document.querySelector('.meta-box time, time.time') || {}).dateTime || null,
       contentEl: container,
@@ -138,25 +120,18 @@ var CsdnAdapter = window.CsdnAdapter || {
     const source = document.querySelector('#content_views');
     if (!source) return GenericAdapter.extract();
 
-    const container = document.createElement('div');
-    container.appendChild(InkIR.detach(source));
-    InkIR.fixLazyImages(container);
-    InkIR.removeNoise(container, [
+    const container = InkIR.buildContainer(source, [
       '.hljs-button', '.hide-preCode-box', '.look-more-preCode',
       '.dp-highlighter .bar', 'pre .toolbar',
     ]);
     // CSDN 折叠代码块：展开被隐藏的部分
     container.querySelectorAll('pre.set-code-hide').forEach(p => p.classList.remove('set-code-hide'));
-    InkIR.absolutizeUrls(container);
-
-    const titleEl = document.querySelector('h1.title-article, #articleContentId');
-    const authorEl = document.querySelector('.follow-nickName, .profile-intro .user-name');
 
     return InkIR.create({
-      title: titleEl ? titleEl.textContent.trim() : document.title,
-      byline: authorEl ? authorEl.textContent.trim() : null,
+      title: InkIR.pickTitle('h1.title-article, #articleContentId'),
+      byline: InkIR.pickText('.follow-nickName, .profile-intro .user-name'),
       siteName: 'CSDN',
-      publishedTime: (document.querySelector('.bar-content .time') || {}).textContent || null,
+      publishedTime: InkIR.pickText('.bar-content .time'),
       contentEl: container,
     });
   },
@@ -179,10 +154,8 @@ var YuqueAdapter = window.YuqueAdapter || {
     const source = document.querySelector('.ne-viewer-body, .lake-content, #content .yuque-doc-content');
     if (!source) return GenericAdapter.extract();
 
-    const container = document.createElement('div');
-    container.appendChild(InkIR.detach(source));
-    InkIR.fixLazyImages(container);
-    InkIR.removeNoise(container, ['.ne-ui-hover-toolbar', '[data-testid="doc-reader-toolbar"]']);
+    const container = InkIR.buildContainer(source,
+      ['.ne-ui-hover-toolbar', '[data-testid="doc-reader-toolbar"]']);
     // 语雀标题 block：ne-h1..ne-h6 → 真实 h 标签
     for (let level = 1; level <= 6; level++) {
       container.querySelectorAll(`ne-h${level}, [data-card-type] h${level}`).forEach((el) => {
@@ -191,11 +164,9 @@ var YuqueAdapter = window.YuqueAdapter || {
         el.replaceWith(h);
       });
     }
-    InkIR.absolutizeUrls(container);
 
-    const titleEl = document.querySelector('#article-title, .DocReader h1, [data-testid="doc-title"]');
     return InkIR.create({
-      title: titleEl ? titleEl.textContent.trim() : document.title.replace(/\s*·\s*语雀.*$/, '').trim(),
+      title: InkIR.pickTitle('#article-title, .DocReader h1, [data-testid="doc-title"]', /\s*·\s*语雀.*$/),
       siteName: '语雀',
       contentEl: container,
     });

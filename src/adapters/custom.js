@@ -40,19 +40,13 @@ var CustomRuleAdapter = window.CustomRuleAdapter || {
       return ir;
     }
 
-    const container = document.createElement('div');
-    container.appendChild(InkIR.detach(source));
-    InkIR.removeNoise(container, (rule.removeSel || '').split(',').map(s => s.trim()).filter(Boolean));
-    InkIR.fixLazyImages(container);
-    InkIR.absolutizeUrls(container);
+    const container = InkIR.buildContainer(source,
+      (rule.removeSel || '').split(',').map(s => s.trim()).filter(Boolean));
 
-    let title = document.title;
-    if (rule.titleSel) {
-      const t = document.querySelector(rule.titleSel);
-      if (t && t.textContent.trim()) title = t.textContent.trim();
-    }
-
-    return InkIR.create({ title, contentEl: container });
+    return InkIR.create({
+      title: InkIR.pickTitle(rule.titleSel || null),
+      contentEl: container,
+    });
   },
 };
 

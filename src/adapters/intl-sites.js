@@ -56,9 +56,8 @@ var StackOverflowAdapter = window.StackOverflowAdapter || {
     InkIR.fixLazyImages(container);
     InkIR.absolutizeUrls(container);
 
-    const titleEl = document.querySelector('#question-header h1 a, #question-header h1');
     return InkIR.create({
-      title: titleEl ? titleEl.textContent.trim() : document.title,
+      title: InkIR.pickTitle('#question-header h1 a, #question-header h1'),
       siteName: 'Stack Overflow',
       contentEl: container,
     });

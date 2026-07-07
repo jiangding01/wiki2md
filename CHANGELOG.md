@@ -8,6 +8,12 @@
 
 - 设置存储收敛为 `core/settings.js` 单一实现（InkSettings：DEFAULTS / read / write / update / reset），
   替换 pipeline / popup / options / background 四处重复代码与三份默认值表——行为无变化
+- 适配器提取样板下沉：`InkIR.buildContainer / pickTitle / pickText`，七个选择器型适配器统一接入，
+  修复各适配器清洗顺序不一致的隐患
+- 界面页共享层：`ui/tokens.css`（设计 token 唯一定义处，四页暗色一致性补齐）+
+  `ui/shared.js`（escapeHtml 补单引号转义 / downloadBlob 统一锚点入 DOM 版本）
+- 页面树导出并行化：同层子页面与图片本地化各 3 路并发，大空间导出时间约降至 1/3
+- stats() 字数统计改单趟码位计数，百万字文档不再产生海量临时分配
 
 ## [1.0.0] - 2026-07-07
 
