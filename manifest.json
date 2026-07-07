@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "摘墨 Inkmark — 网页转 Markdown",
+  "short_name": "摘墨",
+  "version": "1.0.0",
+  "description": "把任意网页摘录为干净的 Markdown：通用兜底＋精配 Confluence/飞书/公众号/知乎/掘金/CSDN/语雀/Stack Overflow，划线评论转脚注、图片打包、批量导出、自定义站点规则。",
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "摘墨：导出本页为 Markdown"
+  },
+  "background": {
+    "service_worker": "src/background/background.js"
+  },
+  "options_page": "src/options/options.html",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "contextMenus",
+    "clipboardWrite"
+  ],
+  "optional_permissions": [
+    "tabs"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
+  "commands": {
+    "export-markdown": {
+      "suggested_key": {
+        "default": "Alt+Shift+M"
+      },
+      "description": "一键下载当前页面的 Markdown"
+    }
+  }
+}

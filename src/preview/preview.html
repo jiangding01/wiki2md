@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>摘墨 · 预览</title>
+  <link rel="stylesheet" href="preview.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="seal">摘</div>
+      <div>
+        <h1 id="doc-title">预览</h1>
+        <span class="sub" id="doc-filename"></span>
+      </div>
+    </div>
+    <div class="toolbar">
+      <div class="segmented">
+        <button class="seg-btn active" data-view="split">对照</button>
+        <button class="seg-btn" data-view="rendered">效果</button>
+        <button class="seg-btn" data-view="source">源码</button>
+      </div>
+      <button id="btn-copy" class="btn-ghost">复制 Markdown</button>
+      <button id="btn-download" class="btn-primary">下载 .md</button>
+    </div>
+  </header>
+
+  <main class="panes" id="panes">
+    <section class="pane pane-rendered">
+      <div class="pane-label">渲染效果</div>
+      <article id="rendered" class="markdown-body"></article>
+    </section>
+    <section class="pane pane-source">
+      <div class="pane-label">Markdown 源码 · 可编辑，改动实时渲染</div>
+      <textarea id="source" spellcheck="false"></textarea>
+    </section>
+  </main>
+
+  <script src="../lib/marked.umd.js"></script>
+  <script src="preview.js"></script>
+</body>
+</html>

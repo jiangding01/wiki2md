@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>摘墨 · 批量导出</title>
+  <link rel="stylesheet" href="batch.css">
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div class="seal">摘</div>
+      <div>
+        <h1>批量导出标签页</h1>
+        <p class="sub">把当前窗口打开的多个页面一次性导出为一个 ZIP（每页一个 .md）</p>
+      </div>
+    </header>
+
+    <!-- 权限引导 -->
+    <section id="perm-gate" class="card perm-gate hidden">
+      <p class="perm-icon">🔐</p>
+      <p class="perm-title">批量导出需要额外授权</p>
+      <p class="perm-desc">
+        读取标签页列表并向多个页面注入提取脚本，需要「访问所有网站」权限。
+        该权限仅在批量导出时使用，你可以随时在 <code>chrome://extensions</code> 中撤销。
+      </p>
+      <button id="btn-grant" class="btn-primary">授予权限</button>
+      <p id="perm-denied" class="perm-denied hidden">授权被拒绝。不授权也可以在每个页面上单独使用摘墨。</p>
+    </section>
+
+    <!-- 标签页列表 -->
+    <section id="tab-picker" class="hidden">
+      <div class="card">
+        <div class="list-head">
+          <label class="check-all">
+            <input type="checkbox" id="check-all" checked> 全选
+          </label>
+          <span id="tab-count" class="tab-count"></span>
+        </div>
+        <div id="tab-list"></div>
+      </div>
+      <div class="action-bar">
+        <span id="batch-status" class="batch-status"></span>
+        <button id="btn-export" class="btn-primary">导出所选为 ZIP</button>
+      </div>
+    </section>
+  </main>
+  <script src="../lib/jszip.min.js"></script>
+  <script src="batch.js"></script>
+</body>
+</html>
