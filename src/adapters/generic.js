@@ -5,7 +5,8 @@
  * 任何没有专门适配的网页都由它处理——「支持所有网页」的基石。
  */
 
-const GenericAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var GenericAdapter = window.GenericAdapter || {
   id: 'generic',
   name: '通用模式',
   badge: 'generic',

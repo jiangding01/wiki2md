@@ -10,7 +10,8 @@
  * - 飞书前端类名随版本变化，选择器可能需要跟进
  */
 
-const FeishuAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var FeishuAdapter = window.FeishuAdapter || {
   id: 'feishu',
   name: '飞书文档',
   badge: 'experimental',

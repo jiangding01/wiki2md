@@ -8,7 +8,8 @@
  * - 兼容 Server/DC 与 Cloud 两种部署形态
  */
 
-const ConfluenceAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var ConfluenceAdapter = window.ConfluenceAdapter || {
   id: 'confluence',
   name: 'Confluence',
   badge: 'precise',

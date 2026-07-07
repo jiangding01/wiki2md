@@ -23,6 +23,15 @@ const CONTENT_FILES = [
 ];
 
 async function injectPipeline(tabId) {
+  // 已注入则跳过：重复注入会把所有脚本文件重放一遍——
+  // 顶层声明重复求值（报错噪音）+ 白白重跑，一次探测省掉这两样
+  try {
+    const [probe] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => window.__INKMARK_LOADED__ === true,
+    });
+    if (probe && probe.result) return;
+  } catch (e) { /* 探测失败（页面受限等）时按未注入处理，让下面的注入给出真实报错 */ }
   await chrome.scripting.executeScript({
     target: { tabId },
     files: CONTENT_FILES,

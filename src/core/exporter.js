@@ -4,7 +4,8 @@
  * fetch 图片时自动携带站点登录态（Confluence/飞书的图片都需要鉴权）。
  */
 
-const InkExporter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var InkExporter = window.InkExporter || {
 
   /** 文件名净化 + 模板渲染。模板变量：{title} {domain} {date} */
   buildFilename(template, ir, ext) {

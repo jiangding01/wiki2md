@@ -407,6 +407,27 @@ async function runPipeline(page, fixture, options) {
     assert(img.files.length === 2, '两张图片均落入 assets/');
   }
 
+  /* ---------- 用例 15：重复注入无害（真实用户报错场景） ---------- */
+  console.log('\n[15] 重复注入 · 全脚本链二次求值零报错');
+  {
+    const p2 = await browser.newPage();
+    const pageErrors = [];
+    p2.on('pageerror', e => pageErrors.push(e.message));
+    await p2.goto('file://' + path.join(ROOT, 'test/fixtures/generic-article.html'));
+    for (let round = 0; round < 2; round++) {
+      for (const f of CONTENT_FILES) {
+        await p2.addScriptTag({ path: path.join(ROOT, f) });
+      }
+    }
+    const ok = await p2.evaluate(async () => {
+      const res = await window.__inkmark.handleAnalyze({ includeComments: false });
+      return res.ok;
+    });
+    assert(pageErrors.length === 0, '二次注入零页面错误（const 重声明已根除）', pageErrors.join(' | '));
+    assert(ok, '重复注入后功能仍正常');
+    await p2.close();
+  }
+
   await browser.close();
 
   /* ---------- 用例 10：注入清单一致性（防「忘记注册新文件」类回归） ---------- */

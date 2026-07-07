@@ -28,7 +28,8 @@
  * }
  */
 
-const InkIR = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var InkIR = window.InkIR || {
   create(partial) {
     return Object.assign({
       title: document.title || '未命名文档',

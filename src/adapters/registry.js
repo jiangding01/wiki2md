@@ -13,7 +13,8 @@
  * 匹配顺序 = 注册顺序；GenericAdapter 永远兜底，必须最后注册。
  */
 
-const InkAdapters = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var InkAdapters = window.InkAdapters || {
   _list: [],
 
   register(adapter) {

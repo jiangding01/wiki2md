@@ -5,7 +5,8 @@
  * 所有平台差异都应在适配器层被抹平，这里只面对规范化的 DOM。
  */
 
-const InkMarkdown = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var InkMarkdown = window.InkMarkdown || {
 
   /** 构建配置好的 TurndownService（含 GFM 与自定义规则）。style 来自用户设置。 */
   createTurndown(style) {

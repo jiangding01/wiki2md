@@ -3,7 +3,8 @@
  * Stack Overflow：通用提取只能拿到问题，这里把「问题 + 全部回答」结构化导出。
  */
 
-const StackOverflowAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var StackOverflowAdapter = window.StackOverflowAdapter || {
   id: 'stackoverflow',
   name: 'Stack Overflow',
   badge: 'precise',

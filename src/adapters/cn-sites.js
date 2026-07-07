@@ -4,7 +4,8 @@
  */
 
 /* ---------------- 微信公众号 ---------------- */
-const WechatAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var WechatAdapter = window.WechatAdapter || {
   id: 'wechat',
   name: '微信公众号',
   badge: 'precise',
@@ -38,7 +39,8 @@ const WechatAdapter = {
 };
 
 /* ---------------- 知乎（专栏 & 回答） ---------------- */
-const ZhihuAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var ZhihuAdapter = window.ZhihuAdapter || {
   id: 'zhihu',
   name: '知乎',
   badge: 'precise',
@@ -85,7 +87,8 @@ const ZhihuAdapter = {
 };
 
 /* ---------------- 掘金 ---------------- */
-const JuejinAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var JuejinAdapter = window.JuejinAdapter || {
   id: 'juejin',
   name: '掘金',
   badge: 'precise',
@@ -119,7 +122,8 @@ const JuejinAdapter = {
 };
 
 /* ---------------- CSDN ---------------- */
-const CsdnAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var CsdnAdapter = window.CsdnAdapter || {
   id: 'csdn',
   name: 'CSDN',
   badge: 'precise',
@@ -157,7 +161,8 @@ const CsdnAdapter = {
 };
 
 /* ---------------- 语雀 ---------------- */
-const YuqueAdapter = {
+// 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
+var YuqueAdapter = window.YuqueAdapter || {
   id: 'yuque',
   name: '语雀',
   badge: 'precise',
