@@ -35,6 +35,17 @@ async function getSettings() {
   return {};
 }
 
+/** 无声入口（右键/快捷键）的结果反馈：工具栏图标角标闪烁 3 秒 */
+async function flashBadge(tabId, ok) {
+  try {
+    await chrome.action.setBadgeBackgroundColor({ tabId, color: ok ? '#1e8e5a' : '#c0392b' });
+    await chrome.action.setBadgeText({ tabId, text: ok ? '✓' : '!' });
+    setTimeout(() => {
+      chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+    }, 3000);
+  } catch (e) { /* tab 已关闭等情况 */ }
+}
+
 /* ---------- 右键菜单 ---------- */
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -55,13 +66,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
     await injectPipeline(tab.id);
     const settings = await getSettings();
+    let res;
     if (info.menuItemId === 'ink-export-selection') {
-      await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT_SELECTION', options: settings });
+      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT_SELECTION', options: settings });
     } else {
-      await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: 'download', options: settings });
+      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: 'download', options: settings });
     }
+    await flashBadge(tab.id, !!(res && res.ok));
   } catch (e) {
     console.warn('[inkmark] context menu export failed:', e);
+    await flashBadge(tab.id, false);
   }
 });
 
@@ -74,9 +88,11 @@ chrome.commands.onCommand.addListener(async (command) => {
   try {
     await injectPipeline(tab.id);
     const settings = await getSettings();
-    await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: 'download', options: settings });
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: 'download', options: settings });
+    await flashBadge(tab.id, !!(res && res.ok));
   } catch (e) {
     console.warn('[inkmark] shortcut export failed:', e);
+    await flashBadge(tab.id, false);
   }
 });
 

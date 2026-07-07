@@ -28,6 +28,7 @@
     mdFence: '```',
     mdLinkStyle: 'inlined',
     complexTable: 'html',
+    highlightAnchors: true,
     keepHistory: true,
     customRules: [],
   };
@@ -52,12 +53,27 @@
   }
   window.__inkProgress = progress; // 供适配器上报（如飞书滚动采集）
 
-  /** 提取结果缓存：analyze 和 export 之间不重复跑适配器（飞书滚动采集很贵） */
+  /** 提取结果缓存：analyze 和 export 之间不重复跑适配器（飞书滚动采集很贵）。
+   *  key 必须包含 URL——SPA 站点（知乎切换回答、飞书切换文档）不刷新页面，
+   *  内容脚本常驻，否则第二篇文章会命中第一篇的缓存（脏读）。 */
   let cache = { ir: null, key: null };
 
   async function getIR(settings) {
-    const key = JSON.stringify({ c: settings.includeComments, r: settings.customRules });
+    const key = JSON.stringify({
+      u: location.href.split('#')[0],
+      c: settings.includeComments,
+      r: settings.customRules,
+    });
     if (cache.ir && cache.key === key) return cache.ir;
+
+    // 页面还在加载时提取会拿到半页内容：等 DOM 就绪（5s 兜底超时）
+    if (document.readyState === 'loading') {
+      progress('等待页面加载…');
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 5000);
+        document.addEventListener('DOMContentLoaded', () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+    }
 
     window.__inkCustomRules = settings.customRules || [];
     const adapter = InkAdapters.resolve();

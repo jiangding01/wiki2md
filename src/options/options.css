@@ -245,6 +245,7 @@ label.row { cursor: pointer; }
   gap: 14px;
   margin-top: 6px;
 }
+.footer-left { display: flex; gap: 8px; margin-right: auto; }
 .save-status { font-size: 12.5px; color: var(--jade); }
 
 .btn-primary {

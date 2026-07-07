@@ -125,6 +125,26 @@ const InkMarkdown = {
       },
     });
 
+    // 视频 / iframe 嵌入 / 音频：Markdown 无法承载，输出可点击的链接占位，
+    // 绝不静默丢弃（数据不丢原则）
+    td.addRule('mediaPlaceholder', {
+      filter: ['iframe', 'video', 'audio', 'embed'],
+      replacement: (content, node) => {
+        let src = node.getAttribute('src') || '';
+        if (!src && node.querySelector) {
+          const source = node.querySelector('source[src]');
+          if (source) src = source.getAttribute('src');
+        }
+        if (!src || src.startsWith('blob:')) return '';
+        let abs = src;
+        if (abs.startsWith('//')) abs = 'https:' + abs; // 协议相对地址统一按 https
+        try { abs = new URL(abs, location.href).href; } catch (e) { /* 保留原值 */ }
+        const label = node.getAttribute('title') || node.getAttribute('aria-label') || '';
+        const kind = node.nodeName === 'AUDIO' ? '🎵 音频' : '▶️ 视频/嵌入内容';
+        return `\n\n[${kind}${label ? '：' + label : ''}](${abs})\n\n`;
+      },
+    });
+
     // 公式（restoreMath 的产物）：原样输出 TeX，不做任何转义
     td.addRule('math', {
       filter: (node) => node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-ink-math'),
@@ -243,12 +263,15 @@ const InkMarkdown = {
   },
 
   /**
-   * 划线评论 → 脚注：在正文中找到 anchorText 首次出现的位置，插入 [^n]
-   * 找不到锚点的划线评论会降级到文末评论区。
+   * 划线评论 → 高亮 + 脚注：在正文中找到 anchorText 首次出现的位置，
+   * 把被划线的原文包成 ==高亮==（可选，Obsidian/Typora 语法），并追加 [^n] 脚注。
+   * 读者在正文里能直接看到「哪段被划过」，评论内容在脚注里。
+   * 找不到锚点的划线评论会降级到文末评论区，绝不丢失。
    */
-  weaveInlineFootnotes(markdown, inlineAnnotations) {
+  weaveInlineFootnotes(markdown, inlineAnnotations, opts) {
     const footnotes = [];
     const orphans = [];
+    const highlight = !opts || opts.highlightAnchors !== false;
     let counter = 0;
 
     for (const ann of inlineAnnotations) {
@@ -259,8 +282,10 @@ const InkMarkdown = {
         const idx = InkMarkdown._indexOutsideCode(markdown, anchor);
         if (idx !== -1) {
           counter += 1;
-          const at = idx + anchor.length;
-          markdown = markdown.slice(0, at) + `[^${counter}]` + markdown.slice(at);
+          const woven = highlight
+            ? `==${anchor}==[^${counter}]`
+            : `${anchor}[^${counter}]`;
+          markdown = markdown.slice(0, idx) + woven + markdown.slice(idx + anchor.length);
           const noteBody = InkMarkdown._formatAnnotationBody(ann);
           footnotes.push(`[^${counter}]: ${noteBody}`);
           placed = true;
@@ -337,6 +362,7 @@ const InkMarkdown = {
       frontMatter: true,
       includeComments: true,
       commentStyle: 'both',
+      highlightAnchors: true,
       includeTitle: true,
     }, options);
 
@@ -361,7 +387,7 @@ const InkMarkdown = {
       const page = ir.annotations.filter(a => a.kind === 'page');
 
       if (opts.commentStyle === 'footnote' || opts.commentStyle === 'both') {
-        const woven = this.weaveInlineFootnotes(body, inline);
+        const woven = this.weaveInlineFootnotes(body, inline, opts);
         body = woven.markdown;
         appendixAnns = woven.orphans.concat(page);
       } else {

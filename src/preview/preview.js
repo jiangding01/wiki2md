@@ -20,25 +20,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('doc-title').textContent = current.title || '预览';
   document.getElementById('doc-filename').textContent = current.filename || '';
   document.title = `摘墨 · ${current.title || '预览'}`;
-  document.getElementById('source').textContent = current.markdown;
 
-  // 渲染视图：front matter 不作为正文渲染，转为元数据条
-  const { frontMatter, body } = splitFrontMatter(current.markdown);
-  const rendered = document.getElementById('rendered');
-  rendered.innerHTML = marked.parse(body, { breaks: false, gfm: true });
-  if (frontMatter) {
-    const meta = document.createElement('div');
-    meta.className = 'meta-strip';
-    frontMatter.split('\n').forEach((line) => {
-      const m = line.match(/^([\w-]+):\s*"?(.*?)"?$/);
-      if (!m || m[1] === 'tags') return;
-      const chip = document.createElement('span');
-      chip.className = 'meta-chip';
-      chip.innerHTML = `<b>${m[1]}</b>${escapeHtml(m[2])}`;
-      meta.appendChild(chip);
-    });
-    rendered.prepend(meta);
-  }
+  const source = document.getElementById('source');
+  source.value = current.markdown;
+  renderMarkdown();
+
+  // 源码可编辑：改动实时重渲染（250ms 防抖），下载/复制用的都是编辑后的内容
+  let renderTimer = null;
+  source.addEventListener('input', () => {
+    current.markdown = source.value;
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(renderMarkdown, 250);
+  });
 
   document.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -65,6 +58,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => URL.revokeObjectURL(url), 30_000);
   });
 });
+
+/** 渲染视图：front matter 不作为正文渲染，转为元数据 chip 条 */
+function renderMarkdown() {
+  const { frontMatter, body } = splitFrontMatter(current.markdown);
+  const rendered = document.getElementById('rendered');
+  rendered.innerHTML = marked.parse(body, { breaks: false, gfm: true });
+  if (frontMatter) {
+    const meta = document.createElement('div');
+    meta.className = 'meta-strip';
+    frontMatter.split('\n').forEach((line) => {
+      const m = line.match(/^([\w-]+):\s*"?(.*?)"?$/);
+      if (!m || m[1] === 'tags') return;
+      const chip = document.createElement('span');
+      chip.className = 'meta-chip';
+      chip.innerHTML = `<b>${m[1]}</b>${escapeHtml(m[2])}`;
+      meta.appendChild(chip);
+    });
+    rendered.prepend(meta);
+  }
+}
 
 function splitFrontMatter(md) {
   const m = md.match(/^---\n([\s\S]*?)\n---\n?/);

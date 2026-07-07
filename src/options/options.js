@@ -13,6 +13,7 @@ const DEFAULTS = {
   mdFence: '```',
   mdLinkStyle: 'inlined',
   complexTable: 'html',
+  highlightAnchors: true,
   keepHistory: true,
   customRules: [],
 };
@@ -26,7 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const s = Object.assign({}, DEFAULTS, stored.inkmarkSettings || {});
 
   // 通用 + 风格
-  for (const key of ['frontMatter', 'includeTitle', 'includeComments', 'keepHistory']) {
+  for (const key of ['frontMatter', 'includeTitle', 'includeComments', 'highlightAnchors', 'keepHistory']) {
     $(key).checked = !!s[key];
   }
   for (const key of ['frontMatterTags', 'commentStyle', 'imageStrategy', 'filenameTemplate',
@@ -47,6 +48,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 保存
   $('btn-save').addEventListener('click', save);
+
+  // 配置备份 / 迁移 / 团队共享自定义规则
+  $('btn-export-cfg').addEventListener('click', exportConfig);
+  $('btn-import-cfg').addEventListener('click', () => $('import-file').click());
+  $('import-file').addEventListener('change', importConfig);
+  $('btn-reset-cfg').addEventListener('click', async () => {
+    if (!confirm('确定恢复全部默认设置？自定义站点规则也会被清除（导出历史不受影响）。')) return;
+    await chrome.storage.sync.remove('inkmarkSettings');
+    location.reload();
+  });
 
   // 支持 #history 等锚点直达
   const hash = location.hash.replace('#', '');
@@ -161,6 +172,58 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
+/* ---------- 配置导入 / 导出 ---------- */
+
+async function exportConfig() {
+  const stored = await chrome.storage.sync.get('inkmarkSettings');
+  const payload = {
+    app: 'inkmark',
+    version: chrome.runtime.getManifest().version,
+    exportedAt: new Date().toISOString(),
+    settings: Object.assign({}, DEFAULTS, stored.inkmarkSettings || {}),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'inkmark-settings.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+async function importConfig(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = ''; // 允许重复选择同一文件
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    const incoming = parsed.settings || parsed; // 兼容裸设置对象
+    if (typeof incoming !== 'object' || incoming === null) throw new Error('格式不正确');
+    // 只接受已知字段，未知字段丢弃——导入的文件不可信
+    const clean = {};
+    for (const key of Object.keys(DEFAULTS)) {
+      if (key === 'customRules') continue; // 数组字段单独校验
+      if (key in incoming && typeof incoming[key] === typeof DEFAULTS[key]) {
+        clean[key] = incoming[key];
+      }
+    }
+    if (Array.isArray(incoming.customRules)) {
+      clean.customRules = incoming.customRules
+        .filter(r => r && typeof r.match === 'string' && typeof r.contentSel === 'string')
+        .map(r => ({
+          name: String(r.name || ''), match: r.match, contentSel: r.contentSel,
+          titleSel: String(r.titleSel || ''), removeSel: String(r.removeSel || ''),
+        }));
+    }
+    await chrome.storage.sync.set({ inkmarkSettings: Object.assign({}, DEFAULTS, clean) });
+    location.reload();
+  } catch (err) {
+    const el = $('save-status');
+    el.textContent = '导入失败：' + (err.message || '文件格式不正确');
+    setTimeout(() => { el.textContent = ''; }, 4000);
+  }
+}
+
 /* ---------- 保存 ---------- */
 
 async function save() {
@@ -177,6 +240,7 @@ async function save() {
     mdFence: $('mdFence').value,
     mdLinkStyle: $('mdLinkStyle').value,
     complexTable: $('complexTable').value,
+    highlightAnchors: $('highlightAnchors').checked,
     keepHistory: $('keepHistory').checked,
     customRules: collectRules(),
   };

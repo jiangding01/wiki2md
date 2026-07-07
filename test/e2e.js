@@ -115,12 +115,16 @@ async function runPipeline(page, fixture, options) {
           }),
         ],
       });
-      return InkMarkdown.render(ir, { frontMatter: false, includeComments: true, commentStyle: 'both' });
+      return {
+        withHighlight: InkMarkdown.render(ir, { frontMatter: false, includeComments: true, commentStyle: 'both' }),
+        noHighlight: InkMarkdown.render(ir, { frontMatter: false, includeComments: true, commentStyle: 'both', highlightAnchors: false }),
+      };
     });
-    assert(md.includes('支付网关[^1]'), '划线评论锚定为脚注');
-    assert(md.includes('[^1]: **陈默 · 2026-07-05**：这里建议写成'), '脚注内容完整');
-    assert(md.includes('## 💬 评论'), '页面评论进附录');
-    assert(md.includes('> > **林晚秋**'), '评论回复嵌套引用');
+    assert(md.withHighlight.includes('==支付网关==[^1]'), '划线原文高亮 + 脚注（默认）');
+    assert(md.noHighlight.includes('支付网关[^1]') && !md.noHighlight.includes('=='), '关闭高亮：仅脚注');
+    assert(md.withHighlight.includes('[^1]: **陈默 · 2026-07-05**：这里建议写成'), '脚注内容完整');
+    assert(md.withHighlight.includes('## 💬 评论'), '页面评论进附录');
+    assert(md.withHighlight.includes('> > **林晚秋**'), '评论回复嵌套引用');
   }
 
   /* ---------- 用例 4：文件名与选项 ---------- */
@@ -214,6 +218,38 @@ async function runPipeline(page, fixture, options) {
       '单元格内 |（含 code span 内）转义为 \\|', pipeRow);
     const boundaryPipes = pipeRow ? (pipeRow.replace(/\\\|/g, '').match(/\|/g) || []).length : 0;
     assert(boundaryPipes === 3, '转义后该行仍是两列结构（恰好 3 个边界 |）', `边界|数=${boundaryPipes}: ${pipeRow}`);
+  }
+
+  /* ---------- 用例 9：媒体占位 与 SPA 缓存失效 ---------- */
+  console.log('\n[9] 体验加固 · 媒体占位 / SPA 缓存');
+  {
+    const media = await page.evaluate(() => {
+      const container = document.createElement('div');
+      container.innerHTML =
+        '<p>视频教程：</p><iframe src="//player.bilibili.com/player.html?bvid=BV1xx" title="部署演示"></iframe>' +
+        '<video><source src="/media/demo.mp4"></video>';
+      const ir = InkIR.create({ title: '媒体测试', contentEl: container });
+      return InkMarkdown.render(ir, { frontMatter: false, includeComments: false });
+    });
+    assert(media.includes('[▶️ 视频/嵌入内容：部署演示](https://player.bilibili.com/'),
+      'iframe → 链接占位（带标题、协议补全）');
+    assert(media.includes('demo.mp4'), 'video source → 链接占位');
+
+    // SPA 场景：URL 变了（pushState）+ 内容变了 → 缓存必须失效
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/generic-article.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const spa = await page.evaluate(async () => {
+      const first = await window.__inkmark.handleAnalyze({ includeComments: false });
+      document.title = 'SPA 切换后的新文章';
+      document.querySelector('h1').textContent = 'SPA 切换后的新文章';
+      history.pushState({}, '', location.pathname + '?spa=2');
+      const second = await window.__inkmark.handleAnalyze({ includeComments: false });
+      return { first: first.title, second: second.title };
+    });
+    assert(spa.first !== spa.second && spa.second.includes('SPA'),
+      'pushState 后缓存失效，导出新文章', JSON.stringify(spa));
   }
 
   await browser.close();

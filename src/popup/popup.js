@@ -43,9 +43,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!inject || !inject.ok) throw new Error((inject && inject.error) || '脚本注入失败');
     await analyze();
   } catch (e) {
-    showError('页面分析失败', e.message);
+    if ((tab.url || '').startsWith('file:')) {
+      showError('无法访问本地文件页面',
+        '请在 chrome://extensions → 摘墨 → 详情 中开启「允许访问文件网址」后重试');
+    } else {
+      showError('页面分析失败', e.message);
+    }
   }
 });
+
+/** popup 里的选择即时写回默认设置——用户的偏好应当被记住 */
+async function persistPrefs(partial) {
+  if (!IS_EXTENSION) return;
+  try {
+    const { inkmarkSettings = {} } = await chrome.storage.sync.get('inkmarkSettings');
+    await chrome.storage.sync.set({ inkmarkSettings: Object.assign({}, inkmarkSettings, partial) });
+  } catch (e) { /* 持久化失败不影响本次导出 */ }
+}
 
 /** 向页面发消息，注入尚未就绪时自动重试一次 */
 async function sendToPage(payload) {
@@ -226,11 +240,17 @@ function bindEvents() {
       state.imageStrategy = btn.dataset.value;
       $('btn-download-label').textContent =
         state.imageStrategy === 'zip' ? '下载 ZIP（含图片）' : '下载 Markdown';
+      persistPrefs({ imageStrategy: state.imageStrategy });
     });
+  });
+
+  $('opt-frontmatter').addEventListener('change', () => {
+    persistPrefs({ frontMatter: $('opt-frontmatter').checked });
   });
 
   // 切换「导出评论」需要重新分析（评论是异步拉取的）
   $('opt-comments').addEventListener('change', () => {
+    persistPrefs({ includeComments: $('opt-comments').checked });
     if (IS_EXTENSION && state.tabId && !state.analyzing) analyze();
   });
 }

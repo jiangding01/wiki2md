@@ -76,6 +76,13 @@
             <option value="appendix">全部进附录</option>
           </select>
         </div>
+        <label class="row">
+          <div>
+            <span class="label">划线原文加高亮标记</span>
+            <span class="hint">被划线的原文包成 <code>==高亮==</code>，正文里一眼可见；Obsidian / Typora 原生渲染，GitHub 会显示为字面符号</span>
+          </div>
+          <span class="toggle"><input type="checkbox" id="highlightAnchors"><i></i></span>
+        </label>
       </section>
 
       <section class="card">
@@ -195,6 +202,12 @@
     </div>
 
     <footer class="footer">
+      <div class="footer-left">
+        <button id="btn-export-cfg" class="btn-ghost btn-small" title="备份全部设置与自定义规则为 JSON">导出配置</button>
+        <button id="btn-import-cfg" class="btn-ghost btn-small" title="从 JSON 恢复设置（可跨设备/团队共享规则）">导入配置</button>
+        <button id="btn-reset-cfg" class="btn-ghost btn-small">恢复默认</button>
+        <input type="file" id="import-file" accept=".json,application/json" hidden>
+      </div>
       <span id="save-status" class="save-status"></span>
       <button id="btn-save" class="btn-primary">保存设置</button>
     </footer>
