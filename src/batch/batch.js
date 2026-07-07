@@ -41,14 +41,17 @@ async function showPicker() {
     row.className = 'tab-item';
     row.innerHTML = `
       <input type="checkbox" data-i="${i}" checked>
-      <img class="tab-favicon" src="${tab.favIconUrl || '../../assets/icons/icon16.png'}"
-           onerror="this.style.visibility='hidden'">
+      <img class="tab-favicon">
       <span class="tab-info">
         <span class="tab-title"></span>
         <span class="tab-url"></span>
       </span>
       ${tab.discarded ? '<span class="tab-tag" title="导出时会自动唤醒并等待加载">休眠</span>' : ''}
       <span class="tab-state" id="state-${i}"></span>`;
+    // 不可信字符串（标题/URL/favicon）一律走属性赋值，不进 innerHTML
+    const icon = row.querySelector('.tab-favicon');
+    icon.src = tab.favIconUrl || '../../assets/icons/icon16.png';
+    icon.addEventListener('error', () => { icon.style.visibility = 'hidden'; });
     row.querySelector('.tab-title').textContent = tab.title || '(无标题)';
     row.querySelector('.tab-url').textContent = tab.url;
     list.appendChild(row);

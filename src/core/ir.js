@@ -88,9 +88,14 @@ const InkIR = {
     });
     root.querySelectorAll('a[href]').forEach((a) => {
       const href = a.getAttribute('href');
-      if (href && !href.startsWith('#') && !href.startsWith('mailto:')) {
-        try { a.setAttribute('href', new URL(href, base).href); } catch (e) { /* 保留原值 */ }
+      if (!href || href.startsWith('#') || href.startsWith('mailto:')) return;
+      // 危险协议直接摘除（javascript:/vbscript:/data:）——
+      // 它们会进入导出的 .md，在任何渲染器里都是攻击载荷
+      if (/^\s*(javascript|vbscript|data)\s*:/i.test(href)) {
+        a.removeAttribute('href');
+        return;
       }
+      try { a.setAttribute('href', new URL(href, base).href); } catch (e) { /* 保留原值 */ }
     });
   },
 

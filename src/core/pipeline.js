@@ -33,15 +33,23 @@
     customRules: [],
   };
 
-  /** 设置合并：默认值 ← storage.sync ← 本次消息覆盖 */
+  /**
+   * 设置合并：默认值 ← 存储 ← 本次消息覆盖。
+   * 存储策略「本地为主、同步尽力」：storage.sync 单项仅 8KB，自定义规则多了会超限，
+   * 所以写入方总是写 local（必成）并尽力写 sync（跨设备）；读取时 local 优先，
+   * local 为空（如新设备刚同步过来）再读 sync。
+   */
   async function loadSettings(overrides) {
     let stored = {};
     try {
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
-        stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
+        if (!stored) {
+          stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
+        }
       }
     } catch (e) { /* 测试环境无 chrome */ }
-    return Object.assign({}, DEFAULTS, stored, overrides || {});
+    return Object.assign({}, DEFAULTS, stored || {}, overrides || {});
   }
 
   function progress(text) {
@@ -57,6 +65,7 @@
    *  key 必须包含 URL——SPA 站点（知乎切换回答、飞书切换文档）不刷新页面，
    *  内容脚本常驻，否则第二篇文章会命中第一篇的缓存（脏读）。 */
   let cache = { ir: null, key: null };
+  let inflight = { key: null, promise: null };
 
   async function getIR(settings) {
     const key = JSON.stringify({
@@ -65,24 +74,36 @@
       r: settings.customRules,
     });
     if (cache.ir && cache.key === key) return cache.ir;
+    // 并发去重：popup 分析与快捷键导出同时触发时只跑一次提取
+    // （飞书滚动采集若并发执行会互相打架）
+    if (inflight.promise && inflight.key === key) return inflight.promise;
 
-    // 页面还在加载时提取会拿到半页内容：等 DOM 就绪（5s 兜底超时）
-    if (document.readyState === 'loading') {
-      progress('等待页面加载…');
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, 5000);
-        document.addEventListener('DOMContentLoaded', () => { clearTimeout(timer); resolve(); }, { once: true });
-      });
+    inflight = {
+      key,
+      promise: (async () => {
+        // 页面还在加载时提取会拿到半页内容：等 DOM 就绪（5s 兜底超时）
+        if (document.readyState === 'loading') {
+          progress('等待页面加载…');
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, 5000);
+            document.addEventListener('DOMContentLoaded', () => { clearTimeout(timer); resolve(); }, { once: true });
+          });
+        }
+        window.__inkCustomRules = settings.customRules || [];
+        const adapter = InkAdapters.resolve();
+        progress(`正在提取（${adapter.name}）…`);
+        const ir = await adapter.extract(settings);
+        ir._adapter = { id: adapter.id, name: adapter.name, badge: adapter.badge };
+        InkIR.restoreMath(ir.contentEl || document.createElement('div'));
+        cache = { ir, key };
+        return ir;
+      })(),
+    };
+    try {
+      return await inflight.promise;
+    } finally {
+      inflight = { key: null, promise: null };
     }
-
-    window.__inkCustomRules = settings.customRules || [];
-    const adapter = InkAdapters.resolve();
-    progress(`正在提取（${adapter.name}）…`);
-    const ir = await adapter.extract(settings);
-    ir._adapter = { id: adapter.id, name: adapter.name, badge: adapter.badge };
-    InkIR.restoreMath(ir.contentEl || document.createElement('div'));
-    cache = { ir, key };
-    return ir;
   }
 
   async function handleAnalyze(options) {

@@ -252,6 +252,59 @@ async function runPipeline(page, fixture, options) {
       'pushState 后缓存失效，导出新文章', JSON.stringify(spa));
   }
 
+  /* ---------- 用例 11：安全与边界（危险协议 / YAML 注入 / 并发去重 / 表头提升） ---------- */
+  console.log('\n[11] 安全与边界');
+  {
+    const sec = await page.evaluate(async () => {
+      // a) 危险协议链接被摘除
+      const c1 = document.createElement('div');
+      c1.innerHTML = '<a href="javascript:alert(1)">点我</a><a href="/ok">正常</a>';
+      InkIR.absolutizeUrls(c1);
+
+      // b) 复杂表格净化：事件属性与危险协议不进导出文件
+      const c2 = document.createElement('div');
+      c2.innerHTML = '<table onclick="evil()"><tr><th>x</th></tr>' +
+        '<tr><td><table><tr><td><a href="javascript:evil()">l</a><img src="x.png" onerror="evil()"></td></tr></table></td></tr></table>';
+      const htmlOut = InkMarkdown.render(
+        InkIR.create({ title: 't', contentEl: c2 }),
+        { frontMatter: false, includeComments: false, complexTable: 'html' });
+
+      // c) YAML：标题换行被压平
+      const c3 = document.createElement('div');
+      c3.innerHTML = '<p>正文</p>';
+      const fmOut = InkMarkdown.render(
+        InkIR.create({ title: '第一行\n第二行', contentEl: c3 }),
+        { frontMatter: true, includeComments: false });
+
+      // d) 并发 getIR 只跑一次提取（同一 IR 对象）
+      const settings = await window.__inkmark.loadSettings({ includeComments: false });
+      const [ir1, ir2] = await Promise.all([
+        window.__inkmark.getIR(settings), window.__inkmark.getIR(settings),
+      ]);
+
+      // e) 无表头表格：首行提升为表头 → GFM 而非原样 HTML
+      const c5 = document.createElement('div');
+      c5.innerHTML = '<table class="noisy"><tr><td>列甲</td><td>列乙</td></tr><tr><td>1</td><td>2</td></tr></table>';
+      const flatOut = InkMarkdown.render(
+        InkIR.create({ title: 't', contentEl: c5 }),
+        { frontMatter: false, includeComments: false, complexTable: 'flatten' });
+
+      return {
+        badHref: c1.innerHTML.includes('javascript:'),
+        okHref: c1.innerHTML.includes('/ok'),
+        htmlOut, fmOut, flatOut,
+        sameIR: ir1 === ir2,
+      };
+    });
+    assert(!sec.badHref && sec.okHref, 'javascript: 链接被摘除，正常链接保留');
+    assert(sec.htmlOut.includes('<table>') && !/onclick|onerror|javascript:/.test(sec.htmlOut),
+      '保留的 HTML 表格无事件属性与危险协议');
+    assert(sec.fmOut.includes('title: "第一行 第二行"'), 'YAML 值内换行压平');
+    assert(sec.sameIR, '并发 getIR 去重（只跑一次提取）');
+    assert(sec.flatOut.includes('| 列甲 | 列乙 |') && !sec.flatOut.includes('<table'),
+      '无表头表格：表头提升转 GFM，不再原样输出未净化 HTML', sec.flatOut);
+  }
+
   await browser.close();
 
   /* ---------- 用例 10：注入清单一致性（防「忘记注册新文件」类回归） ---------- */

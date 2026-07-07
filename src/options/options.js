@@ -20,11 +20,28 @@ const DEFAULTS = {
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * 存储策略「本地为主、同步尽力」：sync 单项限 8KB，规则多了会超限。
+ * 写：local 必成 + sync 尽力；读：local 优先，空则读 sync（新设备场景）。
+ */
+async function readSettings() {
+  const local = await chrome.storage.local.get('inkmarkSettings');
+  if (local.inkmarkSettings) return local.inkmarkSettings;
+  const sync = await chrome.storage.sync.get('inkmarkSettings');
+  return sync.inkmarkSettings || {};
+}
+
+async function writeSettings(settings) {
+  await chrome.storage.local.set({ inkmarkSettings: settings });
+  try {
+    await chrome.storage.sync.set({ inkmarkSettings: settings });
+  } catch (e) { /* 超出 sync 配额：本地已保存，跨设备同步降级 */ }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   bindTabs();
 
-  const stored = await chrome.storage.sync.get('inkmarkSettings');
-  const s = Object.assign({}, DEFAULTS, stored.inkmarkSettings || {});
+  const s = Object.assign({}, DEFAULTS, await readSettings());
 
   // 通用 + 风格
   for (const key of ['frontMatter', 'includeTitle', 'includeComments', 'highlightAnchors', 'keepHistory']) {
@@ -55,7 +72,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('import-file').addEventListener('change', importConfig);
   $('btn-reset-cfg').addEventListener('click', async () => {
     if (!confirm('确定恢复全部默认设置？自定义站点规则也会被清除（导出历史不受影响）。')) return;
-    await chrome.storage.sync.remove('inkmarkSettings');
+    await chrome.storage.local.remove('inkmarkSettings');
+    try { await chrome.storage.sync.remove('inkmarkSettings'); } catch (e) { /* 忽略 */ }
     location.reload();
   });
 
@@ -194,12 +212,11 @@ function escapeHtml(s) {
 /* ---------- 配置导入 / 导出 ---------- */
 
 async function exportConfig() {
-  const stored = await chrome.storage.sync.get('inkmarkSettings');
   const payload = {
     app: 'inkmark',
     version: chrome.runtime.getManifest().version,
     exportedAt: new Date().toISOString(),
-    settings: Object.assign({}, DEFAULTS, stored.inkmarkSettings || {}),
+    settings: Object.assign({}, DEFAULTS, await readSettings()),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -234,7 +251,7 @@ async function importConfig(e) {
           titleSel: String(r.titleSel || ''), removeSel: String(r.removeSel || ''),
         }));
     }
-    await chrome.storage.sync.set({ inkmarkSettings: Object.assign({}, DEFAULTS, clean) });
+    await writeSettings(Object.assign({}, DEFAULTS, clean));
     location.reload();
   } catch (err) {
     const el = $('save-status');
@@ -264,7 +281,7 @@ async function save() {
     keepHistory: $('keepHistory').checked,
     customRules: rules.valid,
   };
-  await chrome.storage.sync.set({ inkmarkSettings: settings });
+  await writeSettings(settings);
   const el = $('save-status');
   if (rules.invalidCount > 0) {
     el.textContent = `已保存，但有 ${rules.invalidCount} 条规则缺少必填项（URL 包含 / 正文选择器）未生效`;

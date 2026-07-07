@@ -104,7 +104,12 @@ const InkMarkdown = {
         const KEEP_ATTRS = ['rowspan', 'colspan', 'align', 'src', 'alt', 'href'];
         [clone, ...clone.querySelectorAll('*')].forEach((el) => {
           Array.from(el.attributes).forEach((attr) => {
-            if (!KEEP_ATTRS.includes(attr.name)) el.removeAttribute(attr.name);
+            if (!KEEP_ATTRS.includes(attr.name)) {
+              el.removeAttribute(attr.name);
+            } else if ((attr.name === 'href' || attr.name === 'src') &&
+                       /^\s*(javascript|vbscript|data\s*:\s*text)/i.test(attr.value)) {
+              el.removeAttribute(attr.name); // 危险协议不进导出文件
+            }
           });
         });
         return '\n\n' + clone.outerHTML.replace(/>\s+</g, '><') + '\n\n';
@@ -177,14 +182,11 @@ const InkMarkdown = {
    *    HTML 表格），结构零丢失；用户也可在设置里选择「强制扁平化」。
    */
 
-  /** 表格结构是否超出 GFM 的表达能力 */
+  /** 表格结构是否超出 GFM 的表达能力（无表头可通过表头提升修复，不算复杂） */
   isComplexTable(table) {
     if (table.querySelector('table')) return true;
     if (table.querySelector('[rowspan]:not([rowspan="1"]), [colspan]:not([colspan="1"])')) return true;
-    const firstRow = table.querySelector('tr');
-    if (!firstRow) return true;
-    // 无表头行：GFM 表格必须有 header 行，硬转会把首行数据当表头
-    if (!Array.from(firstRow.children).every(c => c.tagName === 'TH')) return true;
+    if (!table.querySelector('tr')) return true; // 无行的空表：保留 HTML 最安全
     return false;
   },
 
@@ -203,6 +205,20 @@ const InkMarkdown = {
         if (this.isComplexTable(table)) table.setAttribute('data-ink-keep-html', '1');
       });
     }
+    // 表头提升：GFM 表格必须有表头行。对将转 GFM 的无表头表格，把首行 td 提升为 th。
+    // 否则 gfm 插件会把整表原样 keep 成未净化的 HTML——既丢转换又留下 XSS 面。
+    root.querySelectorAll('table').forEach((table) => {
+      if (table.closest('[data-ink-keep-html]')) return;
+      const first = table.querySelector('tr');
+      if (!first) return;
+      Array.from(first.children).forEach((c) => {
+        if (c.tagName === 'TD') {
+          const th = document.createElement('th');
+          th.innerHTML = c.innerHTML;
+          c.replaceWith(th);
+        }
+      });
+    });
     this.flattenTableCells(root);
   },
 
@@ -245,9 +261,9 @@ const InkMarkdown = {
     });
   },
 
-  /** YAML Front Matter */
+  /** YAML Front Matter。值内换行会破坏 YAML 结构，统一压成空格。 */
   buildFrontMatter(ir, opts) {
-    const esc = (s) => String(s).replace(/"/g, '\\"');
+    const esc = (s) => String(s).replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ').trim();
     const lines = ['---'];
     lines.push(`title: "${esc(ir.title)}"`);
     lines.push(`source: "${esc(ir.url)}"`);

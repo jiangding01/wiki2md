@@ -240,6 +240,28 @@ GFM 表格表达能力有限（无嵌套、无 rowspan/colspan、必须有表头
 | 6 | manifest 描述停留在 5 个站点的旧信息 | 更新为当前能力 |
 | 7 | background 注入清单若漏注册新文件，现有测试测不出（测试自维护清单） | 新增一致性用例：background/测试/磁盘三方比对 + 适配器目录全量注册检查 |
 
+**第三轮审计：安全 / 配额 / 并发（v2.2.2）**
+
+威胁模型：被摘录的网页是**不可信输入**。它可以在表格里埋 `onclick`/`onerror`、
+放 `javascript:` 链接——这些若进入导出的 .md，会在预览页（扩展源）和用户的
+Obsidian/Typora/VSCode 里成为攻击载荷。防线分四层：
+
+| 层 | 措施 |
+| --- | --- |
+| IR 层 | `absolutizeUrls` 摘除 `javascript:/vbscript:/data:` 协议链接 |
+| 表格直通 | 净化白名单之上再过滤 href/src 的危险协议；无表头表格改走「表头提升→GFM」，彻底消灭 gfm 插件原样 keep 未净化 HTML 的路径 |
+| 预览页 | marked 输出先过 DOM 级消毒（移除 script/iframe/on* 属性/危险协议）再 innerHTML——MV3 CSP 之上的纵深防御 |
+| 扩展页 | 不可信字符串（标签页标题/URL/favicon）一律属性赋值，不进 innerHTML |
+
+配额与并发：
+
+- **storage.sync 单项 8KB 配额**：自定义规则多了 `sync.set` 会抛错导致保存静默失败。
+  改为「本地为主、同步尽力」：写入总是落 local（必成）+ 尽力写 sync（跨设备）；
+  读取 local 优先、空则回退 sync（新设备刚同步的场景）。pipeline/options/popup 三处一致。
+- **并发提取去重**：popup 分析与快捷键导出同时触发时，`getIR` 以 in-flight promise
+  去重——飞书滚动采集若并发执行会互相打架。
+- **YAML 注入**：front matter 值内换行压平，标题里的换行不再破坏元数据结构。
+
 ## 9. 路线图
 
 - **v2.0**：适配器架构、通用兜底、Confluence 评论、5 个精配站点、图片 ZIP、预览页、右键节选、快捷键、设置页。✅

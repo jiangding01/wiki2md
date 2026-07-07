@@ -57,12 +57,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-/** popup 里的选择即时写回默认设置——用户的偏好应当被记住 */
+/** popup 里的选择即时写回默认设置——用户的偏好应当被记住。
+ *  存储策略与 pipeline/options 一致：本地为主、同步尽力（sync 有 8KB 配额）。 */
 async function persistPrefs(partial) {
   if (!IS_EXTENSION) return;
   try {
-    const { inkmarkSettings = {} } = await chrome.storage.sync.get('inkmarkSettings');
-    await chrome.storage.sync.set({ inkmarkSettings: Object.assign({}, inkmarkSettings, partial) });
+    let stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
+    if (!stored) stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
+    const merged = Object.assign({}, stored, partial);
+    await chrome.storage.local.set({ inkmarkSettings: merged });
+    try { await chrome.storage.sync.set({ inkmarkSettings: merged }); } catch (e) { /* 超配额降级 */ }
   } catch (e) { /* 持久化失败不影响本次导出 */ }
 }
 
@@ -287,8 +291,9 @@ async function loadSettings() {
     frontMatter: true, includeComments: true, commentStyle: 'both',
     imageStrategy: 'remote', filenameTemplate: '{title}', includeTitle: true,
   };
-  const stored = await chrome.storage.sync.get('inkmarkSettings');
-  return Object.assign(defaults, stored.inkmarkSettings || {});
+  let stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
+  if (!stored) stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
+  return Object.assign(defaults, stored);
 }
 
 function applySettingsToUI() {

@@ -59,11 +59,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 });
 
+/**
+ * DOM 级消毒：markdown 来自任意网页，可能携带原始 HTML（复杂表格直通等）。
+ * 移除脚本类元素、on* 事件属性与危险协议 URL——即便 MV3 扩展页 CSP
+ * 已拦截内联脚本，这里仍做纵深防御。
+ */
+function sanitizeHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, iframe, object, embed, link, meta, form, base').forEach(n => n.remove());
+  doc.querySelectorAll('*').forEach((el) => {
+    Array.from(el.attributes).forEach((attr) => {
+      if (/^on/i.test(attr.name)) {
+        el.removeAttribute(attr.name);
+      } else if ((attr.name === 'href' || attr.name === 'src') &&
+                 /^\s*(javascript|vbscript|data\s*:\s*text)/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+  return doc.body.innerHTML;
+}
+
 /** 渲染视图：front matter 不作为正文渲染，转为元数据 chip 条 */
 function renderMarkdown() {
   const { frontMatter, body } = splitFrontMatter(current.markdown);
   const rendered = document.getElementById('rendered');
-  rendered.innerHTML = marked.parse(body, { breaks: false, gfm: true });
+  rendered.innerHTML = sanitizeHtml(marked.parse(body, { breaks: false, gfm: true }));
   if (frontMatter) {
     const meta = document.createElement('div');
     meta.className = 'meta-strip';
