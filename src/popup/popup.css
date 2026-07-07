@@ -321,8 +321,16 @@ body {
   transition: all .15s;
 }
 .btn-ghost:hover { color: var(--cinnabar); border-color: var(--cinnabar); background: var(--cinnabar-mist); }
+.btn-ghost:disabled { opacity: .55; cursor: wait; }
+.btn-ghost:disabled:hover { color: var(--ink-soft); border-color: var(--paper-line); background: var(--paper-raised); }
 .btn-tree { width: 100%; font-size: 12px; }
 .btn-tree:disabled { opacity: .6; cursor: wait; }
+
+/* 忙态下的选项区 */
+.toggle input:disabled + i { opacity: .5; cursor: wait; }
+.seg-btn:disabled { opacity: .5; cursor: wait; }
+.doc-title:disabled { opacity: .6; }
+.icon-btn:disabled { opacity: .4; cursor: wait; transform: none !important; }
 
 .status-line {
   min-height: 16px;

@@ -10,7 +10,23 @@ const state = {
   imageStrategy: 'remote',
   settings: {},
   analyzing: false,
+  busy: false, // 任一导出进行中：全部动作与选项互斥
 };
+
+/**
+ * 导出互斥：任一导出（下载/ZIP/页面树/复制/预览）进行中，
+ * 其余动作按钮与选项全部禁用——并发导出不会损坏数据
+ * （提取层有去重），但会双倍抓图、进度互相覆盖、弹出多个下载。
+ */
+function setBusy(busy) {
+  state.busy = busy;
+  ['btn-download', 'btn-tree', 'btn-copy', 'btn-preview',
+   'opt-frontmatter', 'opt-comments', 'btn-reanalyze', 'doc-title'].forEach((id) => {
+    const el = $(id);
+    if (el) el.disabled = busy;
+  });
+  document.querySelectorAll('.seg-btn').forEach(b => { b.disabled = busy; });
+}
 
 const IS_EXTENSION = typeof chrome !== 'undefined' && !!(chrome.tabs && chrome.runtime && chrome.runtime.id);
 
@@ -154,6 +170,11 @@ function renderAnalysis(res) {
   // 鉴权站点（Confluence/飞书/语雀）的图片带登录态，远程链接在本地 md 里打不开：
   // 本次会话自动切到「本地打包」（只影响这一次，不改用户的全局默认，可手动切回）
   const notes = (res.warnings || []).slice();
+  // 目录/容器页正文本来就近乎为空，「0 字」需要解释，否则像出了故障
+  if (res.stats.words === 0 && res.adapter.id !== 'generic') {
+    notes.push('本页正文几乎为空——可能是目录/容器页。' +
+      (res.adapter.id === 'confluence' ? '可直接用「导出页面树」打包全部子页面。' : ''));
+  }
   if (res.adapter.authImages && state.imageStrategy === 'remote') {
     state.imageStrategy = 'zip';
     document.querySelectorAll('.seg-btn').forEach((b) => {
@@ -206,8 +227,8 @@ function exportOptions() {
 }
 
 async function doDownload() {
-  const btn = $('btn-download');
-  btn.disabled = true;
+  if (state.busy) return;
+  setBusy(true);
   try {
     if (state.imageStrategy === 'zip') {
       $('btn-download-label').textContent = '抓取图片中…';
@@ -222,12 +243,14 @@ async function doDownload() {
   } catch (e) {
     status('导出失败：' + e.message, true);
   } finally {
-    btn.disabled = false;
+    setBusy(false);
     $('btn-download-label').textContent = state.imageStrategy === 'zip' ? '下载 ZIP（含图片）' : '下载 Markdown';
   }
 }
 
 async function doCopy() {
+  if (state.busy) return;
+  setBusy(true);
   try {
     const res = await sendToPage({
       type: 'INK_EXPORT', action: 'markdown',
@@ -238,10 +261,14 @@ async function doCopy() {
     status('已复制到剪贴板');
   } catch (e) {
     status('复制失败：' + e.message, true);
+  } finally {
+    setBusy(false);
   }
 }
 
 async function doPreview() {
+  if (state.busy) return;
+  setBusy(true);
   try {
     const res = await sendToPage({
       type: 'INK_EXPORT', action: 'markdown', options: exportOptions(),
@@ -254,14 +281,17 @@ async function doPreview() {
     window.close();
   } catch (e) {
     status('预览失败：' + e.message, true);
+  } finally {
+    setBusy(false);
   }
 }
 
 /* ---------- 事件 ---------- */
 
 async function doExportTree() {
+  if (state.busy) return;
   const btn = $('btn-tree');
-  btn.disabled = true;
+  setBusy(true);
   btn.textContent = '🌳 抓取页面树中…';
   try {
     const res = await sendToPage({ type: 'INK_EXPORT_TREE', options: exportOptions() });
@@ -271,7 +301,7 @@ async function doExportTree() {
   } catch (e) {
     status('页面树导出失败：' + e.message, true);
   } finally {
-    btn.disabled = false;
+    setBusy(false);
     btn.textContent = '🌳 导出页面树（含全部子页面）';
   }
 }
