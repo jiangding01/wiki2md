@@ -1,0 +1,52 @@
+/* ============================================================
+   摘墨 · 设计系统 token（唯一定义处）
+   语言：宣纸 × 墨色 × 朱砂印
+   popup / options / preview / batch 四页共享，页面 css 只写布局。
+   ============================================================ */
+
+:root {
+  /* 纸 */
+  --paper: #faf6ee;
+  --paper-raised: #ffffff;
+  --paper-sunken: #f3eee2;
+  --paper-line: #e6ddcb;
+  /* 墨 */
+  --ink: #2b2723;
+  --ink-soft: #6f675c;
+  --ink-faint: #a39a8c;
+  /* 朱砂 */
+  --cinnabar: #c0392b;
+  --cinnabar-deep: #a93226;
+  --cinnabar-mist: rgba(192, 57, 43, 0.08);
+  /* 辅助 */
+  --jade: #1e8e5a;
+  --amber-mist: #fdf3e0;
+  --amber-line: #ecd9b0;
+  --amber-ink: #8a6d3b;
+
+  --radius: 10px;
+  --shadow-card: 0 1px 2px rgba(43, 39, 35, 0.05), 0 4px 14px rgba(43, 39, 35, 0.06);
+  --font-ui: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-brand: "Songti SC", "Noto Serif SC", "SimSun", Georgia, serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1c1a17;
+    --paper-raised: #262320;
+    --paper-sunken: #16140f;
+    --paper-line: #3a352e;
+    --ink: #ece5d8;
+    --ink-soft: #a89f90;
+    --ink-faint: #6f675c;
+    --cinnabar: #e05a48;
+    --cinnabar-deep: #c74836;
+    --cinnabar-mist: rgba(224, 90, 72, 0.12);
+    --jade: #4dbb8a;
+    --amber-mist: #2c2415;
+    --amber-line: #4d3f22;
+    --amber-ink: #d3b271;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
+  }
+}

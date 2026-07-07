@@ -19,6 +19,7 @@ const CONTENT_FILES = [
   'src/lib/turndown.js',
   'src/lib/turndown-plugin-gfm.js',
   'src/lib/jszip.min.js',
+  'src/core/settings.js',
   'src/core/ir.js',
   'src/core/markdown.js',
   'src/adapters/registry.js',
@@ -481,6 +482,73 @@ async function runPipeline(page, fixture, options) {
     assert(pageErrors.length === 0, '二次注入零页面错误（const 重声明已根除）', pageErrors.join(' | '));
     assert(ok, '重复注入后功能仍正常');
     await p2.close();
+  }
+
+  /* ---------- 用例 16：并发池语义 / 300 页硬停 / stats 跨文档类型 ---------- */
+  console.log('\n[16] 并发池 · 页面树上限硬停 · stats localName');
+  {
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/confluence-page.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const pool = await page.evaluate(async () => {
+      // 结果顺序必须与输入一致（zip 目录/图片编号的确定性依赖它），且并发不超上限
+      let running = 0, peak = 0;
+      const out = await InkExporter.mapPool([5, 4, 3, 2, 1], 3, async (n, i) => {
+        running += 1; peak = Math.max(peak, running);
+        await new Promise(r => setTimeout(r, n * 10));
+        running -= 1;
+        return `${i}:${n * 2}`;
+      });
+      return { out, peak };
+    });
+    assert(JSON.stringify(pool.out) === '["0:10","1:8","2:6","3:4","4:2"]',
+      'mapPool 结果保持输入顺序（与完成先后无关）', JSON.stringify(pool.out));
+    assert(pool.peak <= 3 && pool.peak >= 2, 'mapPool 并发数被限制在 limit 内', String(pool.peak));
+
+    const cap = await page.evaluate(async () => {
+      // 根页下挂 350 个子页（每个子页还有孙页）：触顶后必须硬停——
+      // 不再对任何子页调用 child/page，报告只出现一条「超出上限」
+      const json = (obj) => Promise.resolve({ ok: true, json: () => Promise.resolve(obj) });
+      let childListCalls = 0;
+      window.fetch = (url) => {
+        url = String(url);
+        if (url.includes('/child/page')) {
+          childListCalls += 1;
+          if (url.includes('/content/128450/')) {
+            return json({ results: Array.from({ length: 350 }, (_, i) => ({ id: String(1000 + i), title: `批量子页${i}` })) });
+          }
+          return json({ results: [{ id: '9' + url.match(/content\/(\d+)\//)[1], title: '孙页' }] });
+        }
+        if (/\/content\/\d+\?expand/.test(url)) {
+          const id = url.match(/content\/(\d+)\?/)[1];
+          return json({ title: `批量子页${id}`, body: { export_view: { value: '<p>内容</p>' } } });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      };
+      let captured = null;
+      InkExporter.downloadBlob = (blob, filename) => { captured = { blob, filename }; };
+      const res = await window.__inkmark.handleExportTree({ includeComments: false, frontMatter: false });
+      const zip = await JSZip.loadAsync(captured.blob);
+      const report = await (zip.file('导出报告.md') || { async: () => '' }).async('string');
+      const mdCount = Object.keys(zip.files).filter(n => n.endsWith('.md') && n !== '导出报告.md').length;
+      return { res, childListCalls, report, mdCount };
+    });
+    assert(cap.res.ok && cap.res.pages === 300, '恰好导出 300 页（根 + 299 子页）', JSON.stringify(cap.res));
+    assert(cap.childListCalls === 1, '触顶后不再发出任何子页面列表请求（硬停）', String(cap.childListCalls));
+    assert(cap.report.split('超出').length === 2 && cap.report.includes('批量子页299'),
+      '「超出上限」报告恰好一条且指向正确截断点', cap.report);
+    assert(cap.mdCount === 300, 'ZIP 内 md 文件数与导出页数一致', String(cap.mdCount));
+
+    const xhtmlStats = await page.evaluate(() => {
+      // XHTML 文档里 tagName 保持小写——stats 分类不得依赖大写比较
+      const doc = new DOMParser().parseFromString(
+        '<div xmlns="http://www.w3.org/1999/xhtml"><p>正文</p><img src="a.png"/><table><tr><td>x</td></tr></table><pre>code</pre></div>',
+        'application/xhtml+xml');
+      return InkIR.stats({ contentEl: doc.documentElement, annotations: [] });
+    });
+    assert(xhtmlStats.images === 1 && xhtmlStats.tables === 1 && xhtmlStats.codeBlocks === 1,
+      'XHTML 文档中图片/表格/代码块分类正确', JSON.stringify(xhtmlStats));
   }
 
   await browser.close();

@@ -146,14 +146,10 @@ async function exportSelected() {
   if (okCount > 0) {
     $('batch-status').textContent = '正在打包…';
     const blob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
     const d = new Date();
     const pad = (x) => String(x).padStart(2, '0');
-    a.download = `摘墨批量导出-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.zip`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    InkUI.downloadBlob(blob,
+      `摘墨批量导出-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.zip`);
   }
 
   $('batch-status').textContent =

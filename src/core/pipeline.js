@@ -15,41 +15,9 @@
   if (window.__INKMARK_LOADED__) return; // 防重复注入
   window.__INKMARK_LOADED__ = true;
 
-  const DEFAULTS = {
-    frontMatter: true,
-    includeTitle: true,
-    includeComments: true,
-    commentStyle: 'both',
-    imageStrategy: 'remote',
-    filenameTemplate: '{title}',
-    frontMatterTags: 'clippings',
-    mdBullet: '-',
-    mdEmphasis: '*',
-    mdFence: '```',
-    mdLinkStyle: 'inlined',
-    complexTable: 'auto',
-    highlightAnchors: true,
-    keepHistory: true,
-    customRules: [],
-  };
-
-  /**
-   * 设置合并：默认值 ← 存储 ← 本次消息覆盖。
-   * 存储策略「本地为主、同步尽力」：storage.sync 单项仅 8KB，自定义规则多了会超限，
-   * 所以写入方总是写 local（必成）并尽力写 sync（跨设备）；读取时 local 优先，
-   * local 为空（如新设备刚同步过来）再读 sync。
-   */
+  /** 设置合并：默认值 ← 存储 ← 本次消息覆盖（实现见 core/settings.js，全插件唯一） */
   async function loadSettings(overrides) {
-    let stored = {};
-    try {
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
-        if (!stored) {
-          stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
-        }
-      }
-    } catch (e) { /* 测试环境无 chrome */ }
-    return Object.assign({}, DEFAULTS, stored || {}, overrides || {});
+    return InkSettings.merged(overrides);
   }
 
   function progress(text) {
@@ -215,6 +183,7 @@
     const queue = [{ id: rootId, path: [rootIR.title] }];
     const failures = [];
     let fetched = 1;
+    let capped = false;
 
     while (queue.length) {
       const cur = queue.shift();
@@ -225,59 +194,92 @@
         failures.push(`页面 ${cur.id} 的子页面列表拉取失败：${e.message}`);
         continue;
       }
-      for (const child of children) {
-        if (fetched >= TREE_MAX_PAGES) {
-          failures.push(`超出 ${TREE_MAX_PAGES} 页安全上限，「${child.title}」及之后的页面未导出`);
-          queue.length = 0;
-          break;
-        }
-        fetched += 1;
-        progress(`抓取第 ${fetched} 页：${child.title}`);
+      const capacity = TREE_MAX_PAGES - fetched;
+      if (children.length > capacity) {
+        failures.push(`超出 ${TREE_MAX_PAGES} 页安全上限，「${children[capacity] ? children[capacity].title : ''}」及之后的页面未导出`);
+        children = children.slice(0, capacity);
+        // 硬停：清空待爬队列，且本批页面只导出、不再入队下钻——
+        // 否则队列会被下面的 queue.push 重新填满，触顶后继续打 REST 并重复报「超限」
+        capped = true;
+        queue.length = 0;
+      }
+      fetched += children.length;
+      // 同层子页面 3 路并发抓取（串行时大空间导出被 RTT 主导），结果保持原顺序
+      const results = await InkExporter.mapPool(children, 3, async (child) => {
+        progress(`抓取页面：${child.title}`);
         try {
-          const meta = await adapter.fetchPageHtml(child.id);
-          const url = `${base}/pages/viewpage.action?pageId=${child.id}`;
-          nodes.push({ ir: adapter.htmlToIR(meta, url), path: cur.path, title: meta.title });
-          queue.push({ id: child.id, path: cur.path.concat(meta.title) });
+          return { child, meta: await adapter.fetchPageHtml(child.id) };
         } catch (e) {
-          failures.push(`「${child.title || child.id}」抓取失败：${e.message}`);
+          return { child, error: e };
         }
+      });
+      for (const r of results) {
+        if (r.error) {
+          failures.push(`「${r.child.title || r.child.id}」抓取失败：${r.error.message}`);
+          continue;
+        }
+        const url = `${base}/pages/viewpage.action?pageId=${r.child.id}`;
+        nodes.push({ ir: adapter.htmlToIR(r.meta, url), path: cur.path, title: r.meta.title });
+        if (!capped) queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });
       }
     }
 
     progress('正在转换并打包…');
     const zip = new JSZip();
     const renderOpts = Object.assign({}, settings, { includeComments: false });
+
+    // 第一步（顺序）：分配文件名——去重必须有序，才能保证 zip 目录确定性。
+    // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
+    // 目录列表不被「每篇 md 一个长名文件夹」翻倍，配对关系仍一眼可见，
+    // 单独移动某篇 md 时带走 assets/<同名>/ 即可。
     const used = new Set();
-    let imageCount = 0;
-    let imageFailed = 0;
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
+    const entries = nodes.map((n) => {
       const dir = n.path.map(safe).join('/');
-      let name = safe(n.title);
+      const name = safe(n.title);
       let full = (dir ? dir + '/' : '') + name + '.md';
       for (let k = 2; used.has(full); k++) full = (dir ? dir + '/' : '') + `${name}-${k}.md`;
       used.add(full);
-
-      let md = InkMarkdown.render(n.ir, renderOpts);
-      // 页面树的使用场景就是 Confluence——图片全部需要登录态，
-      // 远程链接在本地必然裂图，所以每一页都做图片本地化。
-      // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
-      // 目录列表不被「每篇 md 一个长名文件夹」翻倍，配对关系仍一眼可见，
-      // 单独移动某篇 md 时带走 assets/<同名>/ 即可。
       const fileBase = full.slice(full.lastIndexOf('/') + 1, -3);
-      progress(`图片本地化 ${i + 1}/${nodes.length}：${n.title}`);
-      const localized = await InkExporter.localizeImages(md, null, `assets/${fileBase}`);
-      md = localized.markdown;
+      return { n, dir, full, fileBase };
+    });
+
+    // 第二步（3 路并发）：md 渲染 + 逐页图片本地化。页面树的使用场景就是
+    // Confluence——图片全部需要登录态，远程链接在本地必然裂图。
+    // 渲染放进池里与图片下载重叠，第一张图不用等全部页面渲染完。
+    // 页面级 3 路 × 页内抓图 2 路 = 总并发 6，贴着浏览器同主机连接上限，
+    // 不再触发企业站点的服务端限流（12 路并发时能成功的图会批量 429）。
+    // 单页失败降级为「该页保留远程链接」，绝不让一页异常拖垮整个导出。
+    let localizedDone = 0;
+    let imageCount = 0;
+    let imageFailed = 0;
+    const localizedList = await InkExporter.mapPool(entries, 3, async (entry) => {
+      let localized;
+      try {
+        const md = InkMarkdown.render(entry.n.ir, renderOpts);
+        localized = await InkExporter.localizeImages(md, null, `assets/${entry.fileBase}`, 2);
+      } catch (e) {
+        localized = { markdown: `> ⚠️ 本页转换失败：${e.message}\n`, files: new Map(), failed: [], error: e };
+      }
+      localizedDone += 1;
+      progress(`图片本地化 ${localizedDone}/${entries.length}：${entry.n.title}`);
+      return localized;
+    });
+
+    // 第三步（顺序）：写入 zip 与失败账目
+    entries.forEach((entry, i) => {
+      const localized = localizedList[i];
       imageCount += localized.files.size;
       imageFailed += localized.failed.length;
       for (const [assetPath, blob] of localized.files) {
-        zip.file((dir ? dir + '/' : '') + assetPath, blob);
+        zip.file((entry.dir ? entry.dir + '/' : '') + assetPath, blob);
       }
-      if (localized.failed.length) {
-        failures.push(`「${n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
+      if (localized.error) {
+        failures.push(`「${entry.n.title}」转换失败：${localized.error.message}`);
+      } else if (localized.failed.length) {
+        failures.push(`「${entry.n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
       }
-      zip.file(full, md);
-    }
+      zip.file(entry.full, localized.markdown);
+    });
     if (failures.length) {
       zip.file('导出报告.md',
         `# 页面树导出报告\n\n成功导出 ${nodes.length} 页。以下 ${failures.length} 项失败：\n\n` +
@@ -297,9 +299,7 @@
     for (let i = 0; i < sel.rangeCount; i++) {
       container.appendChild(sel.getRangeAt(i).cloneContents());
     }
-    InkIR.removeNoise(container);
-    InkIR.fixLazyImages(container);
-    InkIR.absolutizeUrls(container);
+    InkIR.normalizeContainer(container);
     InkIR.restoreMath(container);
 
     const ir = InkIR.create({

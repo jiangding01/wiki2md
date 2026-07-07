@@ -79,16 +79,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-/** popup 里的选择即时写回默认设置——用户的偏好应当被记住。
- *  存储策略与 pipeline/options 一致：本地为主、同步尽力（sync 有 8KB 配额）。 */
+/** popup 里的选择即时写回默认设置——用户的偏好应当被记住（实现见 core/settings.js） */
 async function persistPrefs(partial) {
   if (!IS_EXTENSION) return;
   try {
-    let stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
-    if (!stored) stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
-    const merged = Object.assign({}, stored, partial);
-    await chrome.storage.local.set({ inkmarkSettings: merged });
-    try { await chrome.storage.sync.set({ inkmarkSettings: merged }); } catch (e) { /* 超配额降级 */ }
+    await InkSettings.update(partial);
   } catch (e) { /* 持久化失败不影响本次导出 */ }
 }
 
@@ -121,12 +116,20 @@ function friendlyError(msg) {
   return m || '未知错误';
 }
 
-async function analyze() {
+async function analyze(opts) {
+  // 静默模式：结果已在屏时（如切换「导出评论」触发的重分析）不切回加载骨架——
+  // 整卡片闪一下再闪回来非常刺眼，原地等数据回来直接更新数字即可
+  const quiet = !!(opts && opts.quiet) && $('state-ready') &&
+    !$('state-ready').classList.contains('hidden');
   state.analyzing = true;
-  $('state-ready').classList.add('hidden');
-  $('state-error').classList.add('hidden');
-  $('state-loading').classList.remove('hidden');
-  $('loading-text').textContent = '正在研墨，分析页面…';
+  if (!quiet) {
+    $('state-ready').classList.add('hidden');
+    $('state-error').classList.add('hidden');
+    $('state-loading').classList.remove('hidden');
+    $('loading-text').textContent = '正在研墨，分析页面…';
+  } else {
+    status('正在更新分析…');
+  }
   let res = null;
   try {
     res = await sendToPage({
@@ -141,6 +144,7 @@ async function analyze() {
     return showError('页面分析失败', friendlyError(res && res.error));
   }
   renderAnalysis(res);
+  if (quiet) status('');
 }
 
 /* ---------- 渲染 ---------- */
@@ -348,23 +352,17 @@ function bindEvents() {
     persistPrefs({ frontMatter: $('opt-frontmatter').checked });
   });
 
-  // 切换「导出评论」需要重新分析（评论是异步拉取的）
+  // 切换「导出评论」需要重新分析（评论是异步拉取的）——静默刷新，界面不闪
   $('opt-comments').addEventListener('change', () => {
     persistPrefs({ includeComments: $('opt-comments').checked });
-    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze();
+    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze({ quiet: true });
   });
 }
 
 /* ---------- 设置 ---------- */
 
 async function loadSettings() {
-  const defaults = {
-    frontMatter: true, includeComments: true, commentStyle: 'both',
-    imageStrategy: 'remote', filenameTemplate: '{title}', includeTitle: true,
-  };
-  let stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
-  if (!stored) stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
-  return Object.assign(defaults, stored);
+  return InkSettings.merged();
 }
 
 function applySettingsToUI() {

@@ -4,11 +4,14 @@
  * 所有提取/转换/下载都发生在页面上下文（见 core/pipeline.js）。
  */
 
+importScripts('../core/settings.js'); // 设置读写唯一实现（SW 里同样可用）
+
 const CONTENT_FILES = [
   'src/lib/readability.js',
   'src/lib/turndown.js',
   'src/lib/turndown-plugin-gfm.js',
   'src/lib/jszip.min.js',
+  'src/core/settings.js',
   'src/core/ir.js',
   'src/core/markdown.js',
   'src/adapters/registry.js',
@@ -47,13 +50,8 @@ async function getSettings() {
 }
 
 async function getExportAction() {
-  try {
-    let stored = (await chrome.storage.local.get('inkmarkSettings')).inkmarkSettings;
-    if (!stored) stored = (await chrome.storage.sync.get('inkmarkSettings')).inkmarkSettings || {};
-    return stored.imageStrategy === 'zip' ? 'zip' : 'download';
-  } catch (e) {
-    return 'download';
-  }
+  const stored = await InkSettings.read();
+  return stored.imageStrategy === 'zip' ? 'zip' : 'download';
 }
 
 /** 无声入口（右键/快捷键）的结果反馈：工具栏图标角标闪烁 3 秒 */

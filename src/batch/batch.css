@@ -1,40 +1,5 @@
 /* 摘墨 · 批量导出页 —— 与 popup 同一设计系统 */
 
-:root {
-  --paper: #faf6ee;
-  --paper-raised: #ffffff;
-  --paper-sunken: #f3eee2;
-  --paper-line: #e6ddcb;
-  --ink: #2b2723;
-  --ink-soft: #6f675c;
-  --ink-faint: #a39a8c;
-  --cinnabar: #c0392b;
-  --cinnabar-deep: #a93226;
-  --cinnabar-mist: rgba(192, 57, 43, 0.08);
-  --jade: #1e8e5a;
-  --font-ui: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
-  --font-brand: "Songti SC", "Noto Serif SC", "SimSun", Georgia, serif;
-  --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
-  --shadow-card: 0 1px 2px rgba(43,39,35,.05), 0 4px 14px rgba(43,39,35,.06);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #1c1a17;
-    --paper-raised: #262320;
-    --paper-sunken: #16140f;
-    --paper-line: #3a352e;
-    --ink: #ece5d8;
-    --ink-soft: #a89f90;
-    --ink-faint: #6f675c;
-    --cinnabar: #e05a48;
-    --cinnabar-deep: #c74836;
-    --cinnabar-mist: rgba(224, 90, 72, 0.12);
-    --jade: #4dbb8a;
-    --shadow-card: 0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25);
-  }
-}
-
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); color: var(--ink); }
 .hidden { display: none !important; }
@@ -100,11 +65,14 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
 .tab-item input { flex: none; accent-color: var(--cinnabar); }
 .tab-favicon { flex: none; width: 16px; height: 16px; border-radius: 3px; }
 .tab-info { flex: 1; min-width: 0; }
+/* display:block 是省略号生效的前提——行内元素不裁剪，长 URL 会撑破容器 */
 .tab-title {
+  display: block;
   font-size: 13px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tab-url {
+  display: block;
   font-size: 11px; color: var(--ink-faint);
   font-family: var(--font-mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

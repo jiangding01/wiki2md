@@ -50,6 +50,24 @@ var InkExporter = window.InkExporter || {
   },
 
   /**
+   * 简单并发池（唯一实现，图片抓取与页面树导出共用）：
+   * 结果与输入顺序一致——zip 目录顺序、图片编号的确定性都依赖它。
+   * fn 抛出的异常原样向上传播，需要「单项失败不拖垮全局」的调用方自行 try/catch。
+   */
+  async mapPool(items, limit, fn) {
+    const out = new Array(items.length);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (cursor < items.length) {
+        const idx = cursor++;
+        out[idx] = await fn(items[idx], idx);
+      }
+    });
+    await Promise.all(workers);
+    return out;
+  },
+
+  /**
    * 图片本地化：抓取 markdown 中引用的图片 → assets/ 目录 → 改写为相对路径
    * 并发 4 路，单张 20s 超时；data: URI 同样落盘（fetch 原生支持）。
    * 返回 { markdown, files: Map<path, Blob>, failed: string[] }
@@ -59,7 +77,7 @@ var InkExporter = window.InkExporter || {
   _mdImgRe: /(!\[[^\]]*\]\()((?:https?:\/\/|data:image\/)[^)\s]+)(\s+"[^"]*")?(\))/g,
   _htmlImgRe: /(<img[^>]*?src=")((?:https?:\/\/|data:image\/)[^"]+)(")/g,
 
-  async localizeImages(markdown, onProgress, assetDir) {
+  async localizeImages(markdown, onProgress, assetDir, concurrency) {
     const urls = [];
     const seen = new Set();
     const collect = (fetchUrl) => {
@@ -93,16 +111,9 @@ var InkExporter = window.InkExporter || {
       }
     };
 
-    // 4 路并发的简单工作池
-    const CONCURRENCY = 4;
-    let cursor = 0;
-    const worker = async () => {
-      while (cursor < urls.length) {
-        const idx = cursor++;
-        await fetchOne(urls[idx], idx);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker));
+    // 默认 4 路并发；页面树导出会传更小的值（外层已有页面级并发，
+    // 总并发要压在浏览器同主机连接上限 6 以内，避免触发服务端限流）
+    await this.mapPool(urls, concurrency || 4, fetchOne);
 
     // 单趟替换（全文只扫两遍，与图片数量无关）。
     // Markdown 链接目标里的空格/括号会破坏解析，引用写转义形式并保留 title；

@@ -52,13 +52,10 @@ var StackOverflowAdapter = window.StackOverflowAdapter || {
       container.appendChild(aDiv);
     });
 
-    InkIR.removeNoise(container, ['.js-post-menu', '.post-signature', 'aside']);
-    InkIR.fixLazyImages(container);
-    InkIR.absolutizeUrls(container);
+    InkIR.normalizeContainer(container, ['.js-post-menu', '.post-signature', 'aside']);
 
-    const titleEl = document.querySelector('#question-header h1 a, #question-header h1');
     return InkIR.create({
-      title: titleEl ? titleEl.textContent.trim() : document.title,
+      title: InkIR.pickTitle('#question-header h1 a, #question-header h1'),
       siteName: 'Stack Overflow',
       contentEl: container,
     });

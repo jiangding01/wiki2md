@@ -1,47 +1,14 @@
 /** 摘墨 · 设置页（通用 / Markdown 风格 / 站点规则 / 导出历史） */
 
-const DEFAULTS = {
-  frontMatter: true,
-  frontMatterTags: 'clippings',
-  includeTitle: true,
-  includeComments: true,
-  commentStyle: 'both',
-  imageStrategy: 'remote',
-  filenameTemplate: '{title}',
-  mdBullet: '-',
-  mdEmphasis: '*',
-  mdFence: '```',
-  mdLinkStyle: 'inlined',
-  complexTable: 'auto',
-  highlightAnchors: true,
-  keepHistory: true,
-  customRules: [],
-};
+// 默认值与存储读写的唯一实现在 core/settings.js（本页 html 已引入）
+const DEFAULTS = InkSettings.DEFAULTS;
 
 const $ = (id) => document.getElementById(id);
-
-/**
- * 存储策略「本地为主、同步尽力」：sync 单项限 8KB，规则多了会超限。
- * 写：local 必成 + sync 尽力；读：local 优先，空则读 sync（新设备场景）。
- */
-async function readSettings() {
-  const local = await chrome.storage.local.get('inkmarkSettings');
-  if (local.inkmarkSettings) return local.inkmarkSettings;
-  const sync = await chrome.storage.sync.get('inkmarkSettings');
-  return sync.inkmarkSettings || {};
-}
-
-async function writeSettings(settings) {
-  await chrome.storage.local.set({ inkmarkSettings: settings });
-  try {
-    await chrome.storage.sync.set({ inkmarkSettings: settings });
-  } catch (e) { /* 超出 sync 配额：本地已保存，跨设备同步降级 */ }
-}
 
 document.addEventListener('DOMContentLoaded', async () => {
   bindTabs();
 
-  const s = Object.assign({}, DEFAULTS, await readSettings());
+  const s = await InkSettings.merged();
 
   // 通用 + 风格
   for (const key of ['frontMatter', 'includeTitle', 'includeComments', 'highlightAnchors', 'keepHistory']) {
@@ -72,8 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('import-file').addEventListener('change', importConfig);
   $('btn-reset-cfg').addEventListener('click', async () => {
     if (!confirm('确定恢复全部默认设置？自定义站点规则也会被清除（导出历史不受影响）。')) return;
-    await chrome.storage.local.remove('inkmarkSettings');
-    try { await chrome.storage.sync.remove('inkmarkSettings'); } catch (e) { /* 忽略 */ }
+    await InkSettings.reset();
     location.reload();
   });
 
@@ -164,7 +130,7 @@ async function renderHistory() {
     const meta = document.createElement('div');
     meta.className = 'history-meta';
     meta.innerHTML =
-      `<span class="h-adapter">${escapeHtml(entry.adapter || '')}</span> · ` +
+      `<span class="h-adapter">${InkUI.escapeHtml(entry.adapter || '')}</span> · ` +
       `${new Date(entry.ts).toLocaleString()} · ${ACTION_LABEL[entry.action] || entry.action} · ` +
       `${(entry.chars / 1000).toFixed(1)}k 字符` +
       (entry.markdown ? '' : ' · <em>正文未保留</em>');
@@ -180,13 +146,9 @@ async function renderHistory() {
         setTimeout(() => { btn.textContent = '复制'; }, 1200);
       }));
       actions.appendChild(miniBtn('下载', () => {
-        const blob = new Blob([entry.markdown], { type: 'text/markdown;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = entry.filename || 'untitled.md';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        InkUI.downloadBlob(
+          new Blob([entry.markdown], { type: 'text/markdown;charset=utf-8' }),
+          entry.filename || 'untitled.md');
       }));
     }
     actions.appendChild(miniBtn('原文', () => { window.open(entry.url, '_blank'); }));
@@ -205,10 +167,6 @@ function miniBtn(text, onClick) {
   return b;
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
-
 /* ---------- 配置导入 / 导出 ---------- */
 
 async function exportConfig() {
@@ -216,15 +174,11 @@ async function exportConfig() {
     app: 'inkmark',
     version: chrome.runtime.getManifest().version,
     exportedAt: new Date().toISOString(),
-    settings: Object.assign({}, DEFAULTS, await readSettings()),
+    settings: await InkSettings.merged(),
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'inkmark-settings.json';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  InkUI.downloadBlob(
+    new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+    'inkmark-settings.json');
 }
 
 async function importConfig(e) {
@@ -251,7 +205,7 @@ async function importConfig(e) {
           titleSel: String(r.titleSel || ''), removeSel: String(r.removeSel || ''),
         }));
     }
-    await writeSettings(Object.assign({}, DEFAULTS, clean));
+    await InkSettings.write(Object.assign({}, DEFAULTS, clean));
     location.reload();
   } catch (err) {
     const el = $('save-status');
@@ -281,7 +235,7 @@ async function save() {
     keepHistory: $('keepHistory').checked,
     customRules: rules.valid,
   };
-  await writeSettings(settings);
+  await InkSettings.write(settings);
   const el = $('save-status');
   if (rules.invalidCount > 0) {
     el.textContent = `已保存，但有 ${rules.invalidCount} 条规则缺少必填项（URL 包含 / 正文选择器）未生效`;

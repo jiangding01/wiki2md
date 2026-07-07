@@ -65,13 +65,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   sourcePane.addEventListener('scroll', () => syncScroll(sourcePane, paneRendered), { passive: true });
 
   document.getElementById('btn-download').addEventListener('click', () => {
-    const blob = new Blob([current.markdown], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = current.filename || 'untitled.md';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    InkUI.downloadBlob(
+      new Blob([current.markdown], { type: 'text/markdown;charset=utf-8' }),
+      current.filename || 'untitled.md');
   });
 });
 
@@ -109,7 +105,7 @@ function renderMarkdown() {
       if (!m || m[1] === 'tags') return;
       const chip = document.createElement('span');
       chip.className = 'meta-chip';
-      chip.innerHTML = `<b>${m[1]}</b>${escapeHtml(m[2])}`;
+      chip.innerHTML = `<b>${m[1]}</b>${InkUI.escapeHtml(m[2])}`;
       meta.appendChild(chip);
     });
     rendered.prepend(meta);
@@ -120,10 +116,6 @@ function splitFrontMatter(md) {
   const m = md.match(/^---\n([\s\S]*?)\n---\n?/);
   if (!m) return { frontMatter: null, body: md };
   return { frontMatter: m[1], body: md.slice(m[0].length) };
-}
-
-function escapeHtml(s) {
-  return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
 function demoData() {

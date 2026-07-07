@@ -1,5 +1,9 @@
 # 本地开发产物
 node_modules/
-*.zip
-.DS_Store
 dist/
+.DS_Store
+*.zip
+
+# 本地测试依赖的痕迹（npm install playwright 会生成，仓库本体零依赖）
+package.json
+package-lock.json
