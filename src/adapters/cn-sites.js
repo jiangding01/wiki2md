@@ -161,6 +161,7 @@ const YuqueAdapter = {
   id: 'yuque',
   name: '语雀',
   badge: 'precise',
+  authImages: true, // 语雀图床对私有文档同样需要登录态
 
   match(loc, doc) {
     return /(\.|^)yuque\.com$/.test(loc.hostname) &&

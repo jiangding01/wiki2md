@@ -93,7 +93,10 @@
         const adapter = InkAdapters.resolve();
         progress(`正在提取（${adapter.name}）…`);
         const ir = await adapter.extract(settings);
-        ir._adapter = { id: adapter.id, name: adapter.name, badge: adapter.badge };
+        ir._adapter = {
+          id: adapter.id, name: adapter.name, badge: adapter.badge,
+          authImages: !!adapter.authImages,
+        };
         InkIR.restoreMath(ir.contentEl || document.createElement('div'));
         cache = { ir, key };
         return ir;

@@ -12,6 +12,7 @@ const ConfluenceAdapter = {
   id: 'confluence',
   name: 'Confluence',
   badge: 'precise',
+  authImages: true, // 图片需登录态，远程链接在本地 md 里打不开
 
   match(loc, doc) {
     // ?pageId= 识别来自用户 v1 插件的实战经验（Server/DC 常见的 viewpage.action?pageId=xxx 形态）

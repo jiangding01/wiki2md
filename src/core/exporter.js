@@ -42,13 +42,25 @@ const InkExporter = {
    * 返回 { markdown, files: Map<path, Blob>, failed: string[] }
    */
   async localizeImages(markdown, onProgress) {
-    const urls = [];
-    // 摘墨生成的 md 图片全部是 ![alt](url) 形式
-    const re = /!\[[^\]]*\]\(((?:https?:\/\/|data:image\/)[^)\s]+)\)/g;
+    // 收集两类图片引用：
+    //   1) Markdown 形式 ![alt](url)
+    //   2) HTML 块中的 <img src="...">（复杂表格直通会产生；Confluence 单元格里嵌图极常见）
+    // HTML 属性里的 &amp; 必须解码后再抓取，替换时用原始字面量。
+    const jobs = new Map(); // fetchUrl → Set<文中字面量 token>
+    const addJob = (fetchUrl, token) => {
+      if (!jobs.has(fetchUrl)) jobs.set(fetchUrl, new Set());
+      jobs.get(fetchUrl).add(token);
+    };
     let m;
-    while ((m = re.exec(markdown)) !== null) {
-      if (!urls.includes(m[1])) urls.push(m[1]);
+    const mdRe = /!\[[^\]]*\]\(((?:https?:\/\/|data:image\/)[^)\s]+)\)/g;
+    while ((m = mdRe.exec(markdown)) !== null) {
+      addJob(m[1], `](${m[1]})`);
     }
+    const htmlRe = /<img[^>]*?src="((?:https?:\/\/|data:image\/)[^"]+)"/g;
+    while ((m = htmlRe.exec(markdown)) !== null) {
+      addJob(m[1].replace(/&amp;/g, '&'), `src="${m[1]}"`);
+    }
+    const urls = Array.from(jobs.keys());
 
     const files = new Map();
     const failed = [];
@@ -88,7 +100,10 @@ const InkExporter = {
 
     let out = markdown;
     for (const [url, path] of rename) {
-      out = out.split(`](${url})`).join(`](${path})`);
+      for (const token of jobs.get(url)) {
+        const replacement = token.startsWith('](') ? `](${path})` : `src="${path}"`;
+        out = out.split(token).join(replacement);
+      }
     }
     return { markdown: out, files, failed };
   },

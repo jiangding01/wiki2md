@@ -151,10 +151,22 @@ function renderAnalysis(res) {
     $('stat-comments-wrap').classList.add('hidden');
   }
 
+  // 鉴权站点（Confluence/飞书/语雀）的图片带登录态，远程链接在本地 md 里打不开：
+  // 本次会话自动切到「本地打包」（只影响这一次，不改用户的全局默认，可手动切回）
+  const notes = (res.warnings || []).slice();
+  if (res.adapter.authImages && state.imageStrategy === 'remote') {
+    state.imageStrategy = 'zip';
+    document.querySelectorAll('.seg-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.value === 'zip');
+    });
+    $('btn-download-label').textContent = '下载 ZIP（含图片）';
+    notes.push('该站点图片需登录才能访问，已自动切换为「本地打包」，导出的 ZIP 中图片可离线查看（可手动切回远程链接）。');
+  }
+
   const w = $('warnings');
-  if (res.warnings && res.warnings.length) {
+  if (notes.length) {
     w.classList.remove('hidden');
-    w.textContent = res.warnings.join(' ');
+    w.textContent = notes.join(' ');
   } else {
     w.classList.add('hidden');
   }

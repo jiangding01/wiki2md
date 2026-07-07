@@ -14,6 +14,7 @@ const FeishuAdapter = {
   id: 'feishu',
   name: '飞书文档',
   badge: 'experimental',
+  authImages: true, // 图片需登录态，远程链接在本地 md 里打不开
 
   match(loc) {
     return /(\.|^)(feishu\.cn|larksuite\.com)$/.test(loc.hostname) &&

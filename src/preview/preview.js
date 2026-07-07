@@ -48,6 +48,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => { btn.textContent = '复制 Markdown'; }, 1500);
   });
 
+  // 对照视图双栏同步滚动：按滚动比例双向映射（renderd 侧图片/表格与源码行高
+  // 不是线性对应，比例同步能做到「定位区域几乎一致」）。lock 防止回环抖动。
+  const paneRendered = document.querySelector('.pane-rendered');
+  const sourcePane = source; // textarea 自身滚动
+  let scrollLock = false;
+  const syncScroll = (from, to) => {
+    if (scrollLock) return;
+    scrollLock = true;
+    const fromMax = Math.max(1, from.scrollHeight - from.clientHeight);
+    const toMax = Math.max(0, to.scrollHeight - to.clientHeight);
+    to.scrollTop = (from.scrollTop / fromMax) * toMax;
+    requestAnimationFrame(() => { scrollLock = false; });
+  };
+  paneRendered.addEventListener('scroll', () => syncScroll(paneRendered, sourcePane), { passive: true });
+  sourcePane.addEventListener('scroll', () => syncScroll(sourcePane, paneRendered), { passive: true });
+
   document.getElementById('btn-download').addEventListener('click', () => {
     const blob = new Blob([current.markdown], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);

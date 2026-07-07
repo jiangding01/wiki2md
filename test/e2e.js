@@ -374,6 +374,39 @@ async function runPipeline(page, fixture, options) {
     assert(tree.filename.includes('页面树') && tree.filename.endsWith('.zip'), 'ZIP 文件名含标识');
   }
 
+  /* ---------- 用例 14：图片本地化覆盖 HTML 块 & 鉴权站点标记 ---------- */
+  console.log('\n[14] 图片本地化 · HTML 块 <img> / &amp; 解码 / authImages');
+  {
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/confluence-page.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const img = await page.evaluate(async () => {
+      const analysis = await window.__inkmark.handleAnalyze({ includeComments: false });
+      const fetched = [];
+      window.fetch = (url) => {
+        fetched.push(String(url));
+        return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['x'], { type: 'image/png' })) });
+      };
+      // 同时含 markdown 形式与复杂表格直通产生的 HTML 形式（&amp; 编码）
+      const md = '![a](https://w.example.com/a.png?x=1&y=2)\n\n' +
+        '<table><tbody><tr><td><img src="https://w.example.com/b.png?ver=1&amp;mod=2"></td></tr></tbody></table>';
+      const res = await InkExporter.localizeImages(md);
+      return {
+        authImages: analysis.adapter.authImages,
+        out: res.markdown,
+        files: Array.from(res.files.keys()),
+        fetched,
+      };
+    });
+    assert(img.authImages === true, 'Confluence 标记为鉴权图片站点（popup 据此自动切本地打包）');
+    assert(img.out.includes('](assets/img-001.png)'), 'markdown 形式图片本地化');
+    assert(img.out.includes('src="assets/img-002.png"'), 'HTML 块内 <img> 也本地化（此前漏网）');
+    assert(img.fetched.includes('https://w.example.com/b.png?ver=1&mod=2'),
+      'HTML 属性 &amp; 解码后抓取', img.fetched.join(', '));
+    assert(img.files.length === 2, '两张图片均落入 assets/');
+  }
+
   await browser.close();
 
   /* ---------- 用例 10：注入清单一致性（防「忘记注册新文件」类回归） ---------- */
