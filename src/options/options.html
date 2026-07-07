@@ -148,8 +148,9 @@
             <span class="hint">嵌套表格、合并单元格（rowspan/colspan）等 Markdown 语法无法表达的表格</span>
           </div>
           <select id="complexTable" class="select">
-            <option value="html">保留为 HTML 表格（结构零丢失，推荐）</option>
-            <option value="flatten">强制扁平化为纯 Markdown（有损）</option>
+            <option value="auto">智能：合并单元格展开转 Markdown，仅嵌套表格保留 HTML（推荐）</option>
+            <option value="html">保守：复杂表格一律保留 HTML（结构零丢失）</option>
+            <option value="flatten">强制纯 Markdown（嵌套表格压为文本，有损）</option>
           </select>
         </div>
         <div class="row">

@@ -14,10 +14,14 @@ const ConfluenceAdapter = {
   badge: 'precise',
 
   match(loc, doc) {
+    // ?pageId= 识别来自用户 v1 插件的实战经验（Server/DC 常见的 viewpage.action?pageId=xxx 形态）
+    let hasPageIdParam = false;
+    try { hasPageIdParam = !!new URL(loc.href).searchParams.get('pageId'); } catch (e) { /* 忽略 */ }
     return !!(
       doc.querySelector('meta[name="ajs-page-id"]') ||
       doc.querySelector('meta[name="confluence-request-time"]') ||
       doc.body.id === 'com-atlassian-confluence' ||
+      (hasPageIdParam && doc.querySelector('#main-content, #main')) ||
       (loc.pathname.includes('/wiki/') && doc.querySelector('#main-content'))
     );
   },
@@ -28,6 +32,7 @@ const ConfluenceAdapter = {
       document.querySelector('#main-content') ||
       document.querySelector('.wiki-content') ||
       document.querySelector('[data-testid="page-content"]') ||
+      document.querySelector('#main') ||
       document.body;
 
     const container = document.createElement('div');
@@ -39,6 +44,14 @@ const ConfluenceAdapter = {
       '.expand-control',                                   // 折叠面板控件
       '.confluence-information-macro-icon',
       '.aui-icon', '.icon',
+      // ↓ 用户 v1 插件在真实 Server/DC 实例上验证过的噪音清单
+      'thead.tableFloatingHeader',                         // 表格浮动表头（滚动跟随的复制品）
+      '.ia-fixed-sidebar', '.ia-splitter-left', '#sidebar',
+      '#header', '.aui-header', '#footer', '.footer-body',
+      '#comments-section',                                 // 评论区 DOM（评论走 REST API 结构化导出）
+      '#likes-section', '.page-metadata-end',
+      '.plugin-tabmeta-details', '.page-blog-calendar',
+      '.aui-nav-actions-list', '.hidden', 'input[type="hidden"]',
     ]);
 
     this._normalizeCodeMacros(container);

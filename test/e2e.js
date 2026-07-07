@@ -305,6 +305,31 @@ async function runPipeline(page, fixture, options) {
       '无表头表格：表头提升转 GFM，不再原样输出未净化 HTML', sec.flatOut);
   }
 
+  /* ---------- 用例 12：合并单元格网格展开（源自用户 v1 插件的实战方案） ---------- */
+  console.log('\n[12] 表格网格展开 · rowspan/colspan → GFM');
+  {
+    const grid = await page.evaluate(() => {
+      const make = () => {
+        const c = document.createElement('div');
+        c.innerHTML = '<table><tr><th>阶段</th><th>负责人</th></tr>' +
+          '<tr><td rowspan="2">评审</td><td>甲</td></tr><tr><td>乙</td></tr>' +
+          '<tr><td colspan="2">上线窗口待定</td></tr></table>';
+        return c;
+      };
+      return {
+        auto: InkMarkdown.render(InkIR.create({ title: 't', contentEl: make() }),
+          { frontMatter: false, includeComments: false, complexTable: 'auto' }),
+        html: InkMarkdown.render(InkIR.create({ title: 't', contentEl: make() }),
+          { frontMatter: false, includeComments: false, complexTable: 'html' }),
+      };
+    });
+    assert(!grid.auto.includes('<table'), 'auto 模式：合并单元格表格不再落 HTML');
+    assert(grid.auto.includes('| 评审 | 甲 |'), 'rowspan 首格内容保留', grid.auto);
+    assert(/\|\s+\|\s*乙\s*\|/.test(grid.auto), 'rowspan 跨越位补空格、行结构完整', grid.auto);
+    assert(grid.auto.includes('| 上线窗口待定 |'), 'colspan 展开后内容保留');
+    assert(grid.html.includes('rowspan="2"'), 'html 保守模式仍原样保留结构');
+  }
+
   await browser.close();
 
   /* ---------- 用例 10：注入清单一致性（防「忘记注册新文件」类回归） ---------- */

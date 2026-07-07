@@ -190,6 +190,56 @@ const InkMarkdown = {
     return false;
   },
 
+  /** 本表自身（不含嵌套内层表）是否有合并单元格 */
+  _hasSpannedCells(table) {
+    return Array.from(table.rows).some(row =>
+      Array.from(row.cells).some(c => (c.rowSpan || 1) > 1 || (c.colSpan || 1) > 1)
+    );
+  },
+
+  /**
+   * 合并单元格网格展开（源自用户 v1 插件 tableNormalize 的实战方案）：
+   * 把 rowspan/colspan 展开成规则矩形网格——合并格内容落在首格，
+   * 其余跨越位置补空格。展开后的表格是规则网格，可以转 GFM，
+   * 这是把「大量 HTML 表格」降到最少的关键一步。
+   */
+  normalizeTableGrid(table) {
+    const rows = Array.from(table.rows);
+    if (!rows.length) return;
+    const grid = [];
+    rows.forEach((row, r) => {
+      grid[r] = grid[r] || [];
+      let cIndex = 0;
+      Array.from(row.cells).forEach((cell) => {
+        while (grid[r][cIndex]) cIndex++;
+        const rs = cell.rowSpan || 1;
+        const cs = cell.colSpan || 1;
+        const first = cell.cloneNode(true);
+        first.removeAttribute('rowspan');
+        first.removeAttribute('colspan');
+        grid[r][cIndex] = first;
+        for (let i = 0; i < rs; i++) {
+          for (let j = 0; j < cs; j++) {
+            if (i === 0 && j === 0) continue;
+            grid[r + i] = grid[r + i] || [];
+            grid[r + i][cIndex + j] = document.createElement(cell.tagName);
+          }
+        }
+        cIndex += cs;
+      });
+    });
+    const tbody = document.createElement('tbody');
+    grid.forEach((gridRow) => {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < gridRow.length; c++) {
+        tr.appendChild(gridRow[c] || document.createElement('td'));
+      }
+      tbody.appendChild(tr);
+    });
+    table.innerHTML = '';
+    table.appendChild(tbody);
+  },
+
   /**
    * 表格预处理入口：
    * - complexTable='html'（默认）：复杂表格打上 data-ink-keep-html 标记，
@@ -198,11 +248,28 @@ const InkMarkdown = {
    * 随后对「将转为 GFM 的表格」做单元格扁平化。
    */
   prepareTables(root, opts) {
-    const mode = (opts && opts.complexTable) || 'html';
-    if (mode === 'html') {
-      root.querySelectorAll('table').forEach((table) => {
-        if (table.parentElement && table.parentElement.closest('table')) return; // 只标记顶层表格
+    const mode = (opts && opts.complexTable) || 'auto';
+
+    // 第一步：决定哪些表格保留 HTML
+    root.querySelectorAll('table').forEach((table) => {
+      if (table.parentElement && table.parentElement.closest('table')) return; // 只看顶层表格
+      if (mode === 'html') {
+        // 保守模式：任何 GFM 表达不了的结构都原样保留
         if (this.isComplexTable(table)) table.setAttribute('data-ink-keep-html', '1');
+      } else if (mode === 'auto') {
+        // 智能模式（默认）：只有嵌套表格保留 HTML，合并单元格走网格展开
+        if (table.querySelector('table') || !table.querySelector('tr')) {
+          table.setAttribute('data-ink-keep-html', '1');
+        }
+      }
+      // flatten 模式：什么都不保留，全部降级为纯 Markdown
+    });
+
+    // 第二步：对将转 GFM 的表格展开合并单元格（auto/flatten 模式）
+    if (mode !== 'html') {
+      root.querySelectorAll('table').forEach((table) => {
+        if (table.closest('[data-ink-keep-html]')) return;
+        if (this._hasSpannedCells(table)) this.normalizeTableGrid(table);
       });
     }
     // 表头提升：GFM 表格必须有表头行。对将转 GFM 的无表头表格，把首行 td 提升为 th。

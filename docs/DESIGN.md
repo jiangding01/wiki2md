@@ -262,7 +262,28 @@ Obsidian/Typora/VSCode 里成为攻击载荷。防线分四层：
   去重——飞书滚动采集若并发执行会互相打架。
 - **YAML 注入**：front matter 值内换行压平，标题里的换行不再破坏元数据结构。
 
-## 9. 路线图
+## 9. v2.3：吸收 v1 插件的实战经验（用户原始代码合并）
+
+用户提供了其 v1 Confluence 导出插件（TypeScript，adapter/processors 分层，含工程记录）。
+逐文件评审后吸收了三块实战资产：
+
+1. **合并单元格网格展开**（v1 `tableNormalize.ts` → `InkMarkdown.normalizeTableGrid`）——
+   把 rowspan/colspan 展开为规则矩形网格（合并格内容落首格、跨越位补空格），展开后即可
+   转 GFM。这直接回应了 v1 的核心痛点「导出里有大量 HTML 表格」：v1 中单元格含列表/代码
+   的表格与含合并格的表格都会落回 HTML；摘墨的单元格扁平化解决前者，网格展开解决后者，
+   两者合并后**只有真正嵌套的表格才保留 HTML**。表格策略从两档改为三档：
+   `auto`（默认：网格展开 + 仅嵌套保留 HTML）/ `html`（保守零丢失）/ `flatten`（强制纯 md）。
+2. **Server/DC 实例的噪音选择器清单**（v1 `confluence.ts getSelectorsToRemove`）——
+   `thead.tableFloatingHeader`（表格浮动表头复制品）、`.ia-fixed-sidebar`、`#likes-section`、
+   `.plugin-tabmeta-details` 等 12 项在真实实例上验证过的清理项，全部并入 ConfluenceAdapter。
+3. **`?pageId=` 识别与 `#main` 兜底**（v1 `matches`/`getContentRoot`）——Server/DC 常见的
+   `viewpage.action?pageId=xxx` 页面形态与旧主题的容器兜底。
+
+v1 中评估后未吸收的部分及理由：占位符先行的转换策略（摘墨用 Turndown 规则在转换期处理，
+无需占位符往返）；TOC 宏转本地锚点列表（md 阅读器普遍自带目录，摘墨选择移除 TOC 宏）；
+图片 background-image 提取与重试（记入候选，等真实需求触发）。
+
+## 10. 路线图
 
 - **v2.0**：适配器架构、通用兜底、Confluence 评论、5 个精配站点、图片 ZIP、预览页、右键节选、快捷键、设置页。✅
 - **v2.1**：自定义站点规则、批量导出、导出历史、Markdown 风格定制、公式还原、
