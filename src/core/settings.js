@@ -62,9 +62,16 @@ var InkSettings = globalThis.InkSettings || {
     } catch (e) { /* sync 配额超限：跨设备同步降级，功能不受影响 */ }
   },
 
-  /** 读-合并-写的部分更新（popup 即时持久化用） */
-  async update(partial) {
-    await this.write(Object.assign({}, await this.read(), partial));
+  /** 读-合并-写的部分更新（popup 即时持久化用）。
+   *  内部串行化：连续快速调用（如 popup 里连点两个开关）若并发执行，
+   *  后一次的 read 会拿到前一次 write 落盘前的旧值，把刚保存的偏好覆盖回去。 */
+  _updateQueue: Promise.resolve(),
+  update(partial) {
+    const run = this._updateQueue.then(async () => {
+      await this.write(Object.assign({}, await this.read(), partial));
+    });
+    this._updateQueue = run.catch(() => {});
+    return run;
   },
 
   /** 清除（恢复默认） */
@@ -76,5 +83,10 @@ var InkSettings = globalThis.InkSettings || {
     } catch (e) { /* 忽略 */ }
   },
 };
+
+// 默认值表只读：merged() 是浅拷贝，customRules 数组会按引用分发给所有调用方，
+// 任何一处 push/sort 都会污染全上下文的默认值——冻结后此类误用在开发期立刻显形
+Object.freeze(InkSettings.DEFAULTS.customRules);
+Object.freeze(InkSettings.DEFAULTS);
 
 globalThis.InkSettings = InkSettings;

@@ -160,20 +160,6 @@
    */
   const TREE_MAX_PAGES = 300;
 
-  /** 简单并发池：保持结果与输入顺序一致（zip 目录顺序确定性依赖它） */
-  async function mapPool(items, limit, fn) {
-    const out = new Array(items.length);
-    let cursor = 0;
-    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (cursor < items.length) {
-        const idx = cursor++;
-        out[idx] = await fn(items[idx], idx);
-      }
-    });
-    await Promise.all(workers);
-    return out;
-  }
-
   async function handleExportTree(options) {
     const settings = await loadSettings(options);
     window.__inkCustomRules = settings.customRules || [];
@@ -197,6 +183,7 @@
     const queue = [{ id: rootId, path: [rootIR.title] }];
     const failures = [];
     let fetched = 1;
+    let capped = false;
 
     while (queue.length) {
       const cur = queue.shift();
@@ -211,11 +198,14 @@
       if (children.length > capacity) {
         failures.push(`超出 ${TREE_MAX_PAGES} 页安全上限，「${children[capacity] ? children[capacity].title : ''}」及之后的页面未导出`);
         children = children.slice(0, capacity);
+        // 硬停：清空待爬队列，且本批页面只导出、不再入队下钻——
+        // 否则队列会被下面的 queue.push 重新填满，触顶后继续打 REST 并重复报「超限」
+        capped = true;
         queue.length = 0;
       }
       fetched += children.length;
       // 同层子页面 3 路并发抓取（串行时大空间导出被 RTT 主导），结果保持原顺序
-      const results = await mapPool(children, 3, async (child) => {
+      const results = await InkExporter.mapPool(children, 3, async (child) => {
         progress(`抓取页面：${child.title}`);
         try {
           return { child, meta: await adapter.fetchPageHtml(child.id) };
@@ -230,7 +220,7 @@
         }
         const url = `${base}/pages/viewpage.action?pageId=${r.child.id}`;
         nodes.push({ ir: adapter.htmlToIR(r.meta, url), path: cur.path, title: r.meta.title });
-        queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });
+        if (!capped) queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });
       }
     }
 
@@ -238,7 +228,7 @@
     const zip = new JSZip();
     const renderOpts = Object.assign({}, settings, { includeComments: false });
 
-    // 第一步（顺序）：分配文件名（去重必须有序）并完成 md 渲染。
+    // 第一步（顺序）：分配文件名——去重必须有序，才能保证 zip 目录确定性。
     // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
     // 目录列表不被「每篇 md 一个长名文件夹」翻倍，配对关系仍一眼可见，
     // 单独移动某篇 md 时带走 assets/<同名>/ 即可。
@@ -250,16 +240,26 @@
       for (let k = 2; used.has(full); k++) full = (dir ? dir + '/' : '') + `${name}-${k}.md`;
       used.add(full);
       const fileBase = full.slice(full.lastIndexOf('/') + 1, -3);
-      return { n, dir, full, fileBase, md: InkMarkdown.render(n.ir, renderOpts) };
+      return { n, dir, full, fileBase };
     });
 
-    // 第二步（3 路并发）：逐页图片本地化。页面树的使用场景就是 Confluence——
-    // 图片全部需要登录态，远程链接在本地必然裂图。
+    // 第二步（3 路并发）：md 渲染 + 逐页图片本地化。页面树的使用场景就是
+    // Confluence——图片全部需要登录态，远程链接在本地必然裂图。
+    // 渲染放进池里与图片下载重叠，第一张图不用等全部页面渲染完。
+    // 页面级 3 路 × 页内抓图 2 路 = 总并发 6，贴着浏览器同主机连接上限，
+    // 不再触发企业站点的服务端限流（12 路并发时能成功的图会批量 429）。
+    // 单页失败降级为「该页保留远程链接」，绝不让一页异常拖垮整个导出。
     let localizedDone = 0;
     let imageCount = 0;
     let imageFailed = 0;
-    const localizedList = await mapPool(entries, 3, async (entry) => {
-      const localized = await InkExporter.localizeImages(entry.md, null, `assets/${entry.fileBase}`);
+    const localizedList = await InkExporter.mapPool(entries, 3, async (entry) => {
+      let localized;
+      try {
+        const md = InkMarkdown.render(entry.n.ir, renderOpts);
+        localized = await InkExporter.localizeImages(md, null, `assets/${entry.fileBase}`, 2);
+      } catch (e) {
+        localized = { markdown: `> ⚠️ 本页转换失败：${e.message}\n`, files: new Map(), failed: [], error: e };
+      }
       localizedDone += 1;
       progress(`图片本地化 ${localizedDone}/${entries.length}：${entry.n.title}`);
       return localized;
@@ -273,7 +273,9 @@
       for (const [assetPath, blob] of localized.files) {
         zip.file((entry.dir ? entry.dir + '/' : '') + assetPath, blob);
       }
-      if (localized.failed.length) {
+      if (localized.error) {
+        failures.push(`「${entry.n.title}」转换失败：${localized.error.message}`);
+      } else if (localized.failed.length) {
         failures.push(`「${entry.n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
       }
       zip.file(entry.full, localized.markdown);
@@ -297,9 +299,7 @@
     for (let i = 0; i < sel.rangeCount; i++) {
       container.appendChild(sel.getRangeAt(i).cloneContents());
     }
-    InkIR.removeNoise(container);
-    InkIR.fixLazyImages(container);
-    InkIR.absolutizeUrls(container);
+    InkIR.normalizeContainer(container);
     InkIR.restoreMath(container);
 
     const ir = InkIR.create({

@@ -52,9 +52,7 @@ var StackOverflowAdapter = window.StackOverflowAdapter || {
       container.appendChild(aDiv);
     });
 
-    InkIR.removeNoise(container, ['.js-post-menu', '.post-signature', 'aside']);
-    InkIR.fixLazyImages(container);
-    InkIR.absolutizeUrls(container);
+    InkIR.normalizeContainer(container, ['.js-post-menu', '.post-signature', 'aside']);
 
     return InkIR.create({
       title: InkIR.pickTitle('#question-header h1 a, #question-header h1'),

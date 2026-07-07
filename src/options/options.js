@@ -2,15 +2,13 @@
 
 // 默认值与存储读写的唯一实现在 core/settings.js（本页 html 已引入）
 const DEFAULTS = InkSettings.DEFAULTS;
-const readSettings = () => InkSettings.read();
-const writeSettings = (s) => InkSettings.write(s);
 
 const $ = (id) => document.getElementById(id);
 
 document.addEventListener('DOMContentLoaded', async () => {
   bindTabs();
 
-  const s = Object.assign({}, DEFAULTS, await readSettings());
+  const s = await InkSettings.merged();
 
   // 通用 + 风格
   for (const key of ['frontMatter', 'includeTitle', 'includeComments', 'highlightAnchors', 'keepHistory']) {
@@ -176,7 +174,7 @@ async function exportConfig() {
     app: 'inkmark',
     version: chrome.runtime.getManifest().version,
     exportedAt: new Date().toISOString(),
-    settings: Object.assign({}, DEFAULTS, await readSettings()),
+    settings: await InkSettings.merged(),
   };
   InkUI.downloadBlob(
     new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
@@ -207,7 +205,7 @@ async function importConfig(e) {
           titleSel: String(r.titleSel || ''), removeSel: String(r.removeSel || ''),
         }));
     }
-    await writeSettings(Object.assign({}, DEFAULTS, clean));
+    await InkSettings.write(Object.assign({}, DEFAULTS, clean));
     location.reload();
   } catch (err) {
     const el = $('save-status');
@@ -237,7 +235,7 @@ async function save() {
     keepHistory: $('keepHistory').checked,
     customRules: rules.valid,
   };
-  await writeSettings(settings);
+  await InkSettings.write(settings);
   const el = $('save-status');
   if (rules.invalidCount > 0) {
     el.textContent = `已保存，但有 ${rules.invalidCount} 条规则缺少必填项（URL 包含 / 正文选择器）未生效`;

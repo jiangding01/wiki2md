@@ -8,12 +8,26 @@
 
 - 设置存储收敛为 `core/settings.js` 单一实现（InkSettings：DEFAULTS / read / write / update / reset），
   替换 pipeline / popup / options / background 四处重复代码与三份默认值表——行为无变化
-- 适配器提取样板下沉：`InkIR.buildContainer / pickTitle / pickText`，七个选择器型适配器统一接入，
-  修复各适配器清洗顺序不一致的隐患
+- 适配器提取样板下沉：`InkIR.buildContainer / normalizeContainer / pickTitle / pickText`，
+  七个精配适配器与选区导出统一接入，修复各适配器清洗顺序不一致的隐患。
+  注意：自定义站点规则的 `removeSel` 现在在懒加载修复**之后**执行——依赖懒加载占位状态的
+  选择器（如 `img[src^="data:image/gif"]`）请改为匹配真实 src 或 `data-src` 属性
 - 界面页共享层：`ui/tokens.css`（设计 token 唯一定义处，四页暗色一致性补齐）+
   `ui/shared.js`（escapeHtml 补单引号转义 / downloadBlob 统一锚点入 DOM 版本）
-- 页面树导出并行化：同层子页面与图片本地化各 3 路并发，大空间导出时间约降至 1/3
+- 页面树导出并行化：同层子页面 3 路并发抓取，渲染与图片本地化进同一并发池重叠执行；
+  对源站总并发压在 6 以内（浏览器同主机连接上限），避免触发企业站点限流
 - stats() 字数统计改单趟码位计数，百万字文档不再产生海量临时分配
+
+### 修复（合并前代码审查）
+
+- 页面树导出触达 300 页上限后未真正停止：队列被本层子页面重新填回，继续发多余的
+  REST 请求并重复写「超出上限」报告——现改为硬停（触顶层只导出、不再下钻）
+- 页面树导出中单页转换/本地化异常会中断整个导出且遗留后台孤儿请求——
+  现降级为该页保留远程链接并计入导出报告
+- `InkSettings.update` 串行化：popup 里快速连点两个开关时，后一次读-改-写可能
+  用旧快照覆盖掉前一次刚保存的偏好
+- `InkSettings.DEFAULTS` 冻结（含 customRules 数组），杜绝共享默认值被调用方原地修改污染
+- stats() 元素分类改用 `localName`，XHTML 页面上图片/表格数不再误计为代码块
 
 ## [1.0.0] - 2026-07-07
 

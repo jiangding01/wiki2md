@@ -33,9 +33,9 @@
 | 事项 | 说明 |
 | --- | --- |
 | ~~设置读写收敛为 core/settings.js~~ | ✅ 已完成：InkSettings 单一实现（DEFAULTS/read/write/update/reset），pipeline/popup/options/background 四处统一接入 |
-| ~~适配器提取样板下沉~~ | ✅ 已完成：InkIR.buildContainer / pickTitle / pickText，七个适配器统一接入，顺序不一致隐患消除 |
+| ~~适配器提取样板下沉~~ | ✅ 已完成：InkIR.buildContainer / normalizeContainer / pickTitle / pickText，七个适配器与选区导出统一接入，顺序不一致隐患消除 |
 | ~~界面页共享工具~~ | ✅ 已完成：ui/tokens.css（设计 token 唯一定义）+ ui/shared.js（escapeHtml/downloadBlob），四页接入，escapeHtml 顺带补齐单引号转义 |
-| ~~页面树导出并行化~~ | ✅ 已完成：同层子页面 3 路并发抓取 + 图片本地化 3 路并发，文件名分配保持有序确定性 |
+| ~~页面树导出并行化~~ | ✅ 已完成：同层子页面 3 路并发抓取，渲染+图片本地化同池重叠；对源站总并发 ≤ 6，文件名分配保持有序确定性 |
 | ~~stats() 大文档性能~~ | ✅ 已完成：单趟码位计数零中间分配，三次选择器查询合一 |
 
 ## 已完成（v1.0.0 交付）

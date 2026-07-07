@@ -114,17 +114,23 @@ var InkIR = window.InkIR || {
   },
 
   /**
-   * 选择器型适配器的标准提取序列：克隆 → 懒加载修复 → 噪音清理 → URL 绝对化。
+   * 标准清洗序列：懒加载修复 → 噪音清理 → URL 绝对化。
    * 顺序是隐性契约：fixLazyImages 必须先于 absolutizeUrls，
    * 否则 data-src 里的相对路径不会被绝对化。所有适配器统一走这里，不再各自手拼。
+   * （自行拼装 container 的适配器——如 Stack Overflow——也走这里，只跳过克隆一步。）
    */
-  buildContainer(sourceEl, extraNoise, baseUrl) {
-    const container = document.createElement('div');
-    container.appendChild(this.detach(sourceEl));
+  normalizeContainer(container, extraNoise, baseUrl) {
     this.fixLazyImages(container);
     this.removeNoise(container, extraNoise);
     this.absolutizeUrls(container, baseUrl);
     return container;
+  },
+
+  /** 选择器型适配器的标准提取序列：克隆 + 标准清洗 */
+  buildContainer(sourceEl, extraNoise, baseUrl) {
+    const container = document.createElement('div');
+    container.appendChild(this.detach(sourceEl));
+    return this.normalizeContainer(container, extraNoise, baseUrl);
   },
 
   /** 标题兜底链：选择器命中非空文本即用，否则 document.title（可剥站点后缀） */
@@ -222,9 +228,10 @@ var InkIR = window.InkIR || {
     }
     let images = 0, tables = 0, codeBlocks = 0;
     if (root) {
+      // localName 而非 tagName：XHTML 文档里 tagName 保持小写，大写比较会全部误判
       root.querySelectorAll('img, table, pre').forEach((el) => {
-        if (el.tagName === 'IMG') images += 1;
-        else if (el.tagName === 'TABLE') tables += 1;
+        if (el.localName === 'img') images += 1;
+        else if (el.localName === 'table') tables += 1;
         else codeBlocks += 1;
       });
     }
