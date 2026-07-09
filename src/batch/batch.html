@@ -40,12 +40,17 @@
         <div id="tab-list"></div>
       </div>
       <div class="action-bar">
+        <label class="opt-localize" title="在每个页面内抓取图片（自动携带登录态）并打包进 ZIP——内网 wiki、飞书等需登录的站点建议开启">
+          <input type="checkbox" id="opt-localize"> 图片本地化打包
+        </label>
         <span id="batch-status" class="batch-status"></span>
         <button id="btn-export" class="btn-primary">导出所选为 ZIP</button>
       </div>
     </section>
   </main>
   <script src="../ui/shared.js"></script>
+  <script src="../core/settings.js"></script>
+  <script src="../core/exporter.js"></script>
   <script src="../lib/jszip.min.js"></script>
   <script src="batch.js"></script>
 </body>

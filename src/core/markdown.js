@@ -152,6 +152,8 @@ var InkMarkdown = window.InkMarkdown || {
         let abs = src;
         if (abs.startsWith('//')) abs = 'https:' + abs; // 协议相对地址统一按 https
         try { abs = new URL(abs, location.href).href; } catch (e) { /* 保留原值 */ }
+        // iframe/video/audio 不经过 absolutizeUrls（它只扫 img/a），括号转义在此补齐
+        abs = InkIR.escapeUrlParens(abs);
         const label = node.getAttribute('title') || node.getAttribute('aria-label') || '';
         const kind = node.nodeName === 'AUDIO' ? '🎵 音频' : '▶️ 视频/嵌入内容';
         return `\n\n[${kind}${label ? '：' + label : ''}](${abs})\n\n`;

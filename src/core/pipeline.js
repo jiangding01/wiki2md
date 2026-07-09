@@ -156,15 +156,49 @@
       if (settings.keepHistory) await InkExporter.recordHistory(ir, markdown, filename, 'zip');
       return { ok: true, filename: filename.replace(/\.md$/, '.zip'), ...result };
     }
+    if (action === 'localized') {
+      // 批量导出用：图片抓取必须发生在本页上下文（登录态只在页面里），
+      // 抓好的图以 base64 随消息带回，由批量页统一写 ZIP。
+      const localized = await InkExporter.localizeImages(
+        markdown,
+        (done, total) => progress(`抓取图片 ${done}/${total}…`),
+        settings.assetDir || 'assets'
+      );
+      if (settings.keepHistory) {
+        // 历史记录存未本地化的 markdown——脱离 ZIP 的 assets 相对路径没有意义
+        await InkExporter.recordHistory(ir, markdown, filename, 'batch');
+      }
+      let totalBytes = 0;
+      for (const blob of localized.files.values()) totalBytes += blob.size;
+      if (totalBytes > MESSAGE_IMAGE_BUDGET) {
+        // 超预算的页面整页降级为远程链接，绝不让一页撑爆整批消息通道
+        return { ok: true, markdown, filename, title: ir.title, images: [], imageFailed: 0, oversize: true };
+      }
+      // base64 转码是纯本地异步操作，并行把 N 张图压成近似单张耗时
+      const images = await Promise.all(Array.from(localized.files, async ([path, blob]) =>
+        ({ path, base64: await InkExporter.blobToBase64(blob) })));
+      return {
+        ok: true,
+        markdown: localized.markdown,
+        filename, title: ir.title, images,
+        imageFailed: localized.failed.length,
+        oversize: false,
+      };
+    }
     throw new Error('未知导出动作: ' + action);
   }
 
   /**
    * Confluence 页面树批量导出：当前页 + 全部子孙页面 → 一个 ZIP（目录镜像层级）。
-   * 全程走同源 REST API，不打开任何标签页。评论不随树导出（每页多一次 API，
-   * 大空间下太慢）；失败页面写入 ZIP 内的「导出报告.md」，绝不静默丢失。
+   * 全程走同源 REST API，不打开任何标签页。评论跟随「导出评论」开关
+   * （每页多一次 API，关掉开关即可换速度）；失败页面写入 ZIP 内的
+   * 「导出报告.md」，绝不静默丢失。
    */
   const TREE_MAX_PAGES = 300;
+
+  /** 批量导出单页图片总量预算（原始字节）。chrome 扩展消息上限 64MB，
+   *  base64 膨胀 4/3：32MB 原始 ≈ 43MB 编码后，给 markdown 与序列化留足余量。 */
+  const MESSAGE_IMAGE_BUDGET = 32 * 1024 * 1024;
 
   async function handleExportTree(options) {
     const settings = await loadSettings(options);
@@ -214,7 +248,20 @@
       const results = await InkExporter.mapPool(children, 3, async (child) => {
         progress(`抓取页面：${child.title}`);
         try {
-          return { child, meta: await adapter.fetchPageHtml(child.id) };
+          // 评论跟随「导出评论」开关（每页 +1 次 API）；与正文并行拉取——
+          // 二者互不依赖，串行会让大空间的抓取墙钟接近翻倍。
+          // 3 路池 × 每页 2 请求 = 6 在途，贴着浏览器同主机连接上限，不超。
+          // 评论失败只降级告警，绝不影响该页正文导出。
+          let commentError = null;
+          const commentState = {};
+          const commentsP = settings.includeComments !== false
+            ? adapter.fetchCommentsFor(child.id, commentState)
+                .catch((e) => { commentError = e; return []; })
+            : Promise.resolve([]);
+          const [meta, annotations] = await Promise.all([
+            adapter.fetchPageHtml(child.id), commentsP,
+          ]);
+          return { child, meta, annotations, commentError, commentState };
         } catch (e) {
           return { child, error: e };
         }
@@ -225,14 +272,21 @@
           continue;
         }
         const url = `${base}/pages/viewpage.action?pageId=${r.child.id}`;
-        nodes.push({ ir: adapter.htmlToIR(r.meta, url), path: cur.path, title: r.meta.title });
+        const ir = adapter.htmlToIR(r.meta, url);
+        ir.annotations = r.annotations;
+        if (r.commentError) {
+          failures.push(`「${r.meta.title}」评论拉取失败（${r.commentError.message}），仅导出正文`);
+        } else if (r.commentState.truncated) {
+          failures.push(`「${r.meta.title}」评论超出拉取上限，已截断`);
+        }
+        nodes.push({ ir, path: cur.path, title: r.meta.title });
         if (!capped) queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });
       }
     }
 
     progress('正在转换并打包…');
     const zip = new JSZip();
-    const renderOpts = Object.assign({}, settings, { includeComments: false });
+    const renderOpts = Object.assign({}, settings); // 评论呈现方式与单页导出一致
 
     // 第一步（顺序）：分配文件名——去重必须有序，才能保证 zip 目录确定性。
     // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
