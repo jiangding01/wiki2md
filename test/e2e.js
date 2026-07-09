@@ -752,10 +752,53 @@ async function runPipeline(page, fixture, options) {
       '回退路径仍能导出可见内容');
   }
 
+  /* ---------- 用例 10：代码审读修复回归（围栏感知清洗 / 锚点编织 / 前言转义） ---------- */
+  console.log('\n[10] 修复回归 · 清洗不进代码块、锚点转义感知、脚注编号避让');
+  {
+    const page2 = await browser.newPage();
+    await page2.goto('file://' + path.join(ROOT, 'test/fixtures', 'generic-article.html'));
+    for (const f of CONTENT_FILES) {
+      await page2.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const r = await page2.evaluate(() => {
+      const M = window.InkMarkdown;
+      const out = {};
+      // 围栏感知清洗：正文的零宽/nbsp/空行处理不得进入代码块
+      out.cleaned = M._cleanupOutsideCode(
+        '段一\u200b\n\n\n\n段二\u00a0x\n\n```js\nl1\n\n\n\nl4\u00a0keep\n```\n\n\n尾');
+      // 编号避让：正文自带 [^3]，织入的脚注从 [^4] 开始
+      out.weaveAvoid = M.weaveInlineFootnotes('自带[^3]，目标句。\n\n[^3]: 旧',
+        [{ anchorText: '目标句', content: 'A', author: null, time: null, replies: [] }], {}).markdown;
+      // 转义感知：锚点原文含 *，md 里被 Turndown 转义为 \*
+      const w2 = M.weaveInlineFootnotes('前 foo \\*bar\\* 后',
+        [{ anchorText: 'foo *bar*', content: 'B', author: null, time: null, replies: [] }], {});
+      out.escHit = w2.orphans.length === 0 && w2.markdown.includes('==foo \\*bar\\*==[^1]');
+      // 未闭合围栏（奇数个 ```）内不作为可锚定正文
+      out.unclosed = M._indexOutsideCode('```\ncode target', 'target');
+      // YAML 反斜杠最先转义
+      out.fm = M.buildFrontMatter({ title: '斜杠\\', url: 'https://x.com' }, {});
+      // 自定义规则选择器列表按顶层逗号拆分
+      out.split = window.CustomRuleAdapter._splitSelectorList(':is(.a, .b), .c, [data-x="1,2"]');
+      return out;
+    });
+    await page2.close();
+    assert(r.cleaned.includes('l1\n\n\n\nl4\u00a0keep'),
+      '清洗不进代码块（连续空行与 nbsp 原样保留）', JSON.stringify(r.cleaned));
+    assert(r.cleaned.includes('段一\n\n段二 x'),
+      '正文零宽/nbsp 清理与空行收敛仍生效', JSON.stringify(r.cleaned));
+    assert(r.weaveAvoid.includes('==目标句==[^4]'),
+      '脚注编号避让正文自带的 [^n]', r.weaveAvoid);
+    assert(r.escHit, '被 Turndown 转义的锚点原文可命中（\\* 保留呈现）');
+    assert(r.unclosed === -1, '未闭合围栏内不作为锚点正文');
+    assert(r.fm.includes('title: "斜杠\\\\"'), 'YAML 反斜杠转义', r.fm.split('\n')[1]);
+    assert(r.split.length === 3 && r.split[0] === ':is(.a, .b)' && r.split[2] === '[data-x="1,2"]',
+      'removeSel 按顶层逗号拆分（:is/属性值里的逗号不拆）', JSON.stringify(r.split));
+  }
+
   await browser.close();
 
-  /* ---------- 用例 10：注入清单一致性（防「忘记注册新文件」类回归） ---------- */
-  console.log('\n[10] 注入清单 · background 与测试/磁盘三方一致');
+  /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ---------- */
+  console.log('\n[11] 注入清单 · background 与测试/磁盘三方一致');
   {
     const bg = fs.readFileSync(path.join(ROOT, 'src/background/background.js'), 'utf8');
     const m = bg.match(/const CONTENT_FILES = \[([\s\S]*?)\];/);

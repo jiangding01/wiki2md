@@ -40,13 +40,38 @@ var CustomRuleAdapter = window.CustomRuleAdapter || {
       return ir;
     }
 
-    const container = InkIR.buildContainer(source,
-      (rule.removeSel || '').split(',').map(s => s.trim()).filter(Boolean));
+    const container = InkIR.buildContainer(source, this._splitSelectorList(rule.removeSel));
 
     return InkIR.create({
       title: InkIR.pickTitle(rule.titleSel || null),
       contentEl: container,
     });
+  },
+
+  /**
+   * 按「顶层逗号」拆分选择器列表：:is(a, b)、[attr="x,y"] 里的逗号不拆。
+   * 拆开只为单条失效不拖累其余（removeNoise 对每条各自 try/catch）；
+   * 朴素 split(',') 会把函数式伪类拆成两个非法选择器，整条规则的剔除全部失效。
+   */
+  _splitSelectorList(s) {
+    const out = [];
+    let cur = '';
+    let depth = 0;
+    let quote = null;
+    for (const ch of String(s || '')) {
+      if (quote) {
+        cur += ch;
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
+      if (ch === '(' || ch === '[') depth += 1;
+      else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+      if (ch === ',' && depth === 0) { out.push(cur); cur = ''; continue; }
+      cur += ch;
+    }
+    out.push(cur);
+    return out.map(x => x.trim()).filter(Boolean);
   },
 };
 

@@ -4,6 +4,7 @@ dist/
 .DS_Store
 *.zip
 
-# 本地测试依赖的痕迹（npm install playwright 会生成，仓库本体零依赖）
+# 本地测试依赖的痕迹（npm/pnpm install playwright 会生成，仓库本体零依赖）
 package.json
 package-lock.json
+pnpm-lock.yaml

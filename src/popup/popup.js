@@ -11,6 +11,7 @@ const state = {
   settings: {},
   analyzing: false,
   busy: false, // 任一导出进行中：全部动作与选项互斥
+  localAction: false, // 本 popup 发起的动作进行中（区分页面侧忙态广播的来源）
   autoSwitchedZip: false, // 鉴权站点自动切 zip 只做一次，用户手动切回后不再强制
 };
 
@@ -48,7 +49,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 内容脚本进度实时回显（图片抓取 / 飞书滚动采集）。
   // 分析阶段界面停在加载态，进度必须写到加载文案上，否则用户以为卡死了。
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    // 只认当前标签页内容脚本的消息——批量导出等场景下其他标签页
+    // 也在广播进度/忙态，不过滤会串台（别的页面导出会禁用本 popup）
+    if (!sender || !sender.tab || sender.tab.id !== state.tabId) return;
     if (msg && msg.type === 'INK_PROGRESS') {
       if (!$('state-loading').classList.contains('hidden')) {
         $('loading-text').textContent = msg.text;
@@ -61,7 +65,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 页面侧忙态广播：popup 关闭重开后据此恢复/解除互斥（导出在页面内继续跑）
     if (msg && msg.type === 'INK_BUSY') {
       setBusy(msg.busy);
-      if (!msg.busy) status('导出完成');
+      // 「导出完成」只在本 popup 没有发起动作时展示（popup 重开的场景）——
+      // 自己发起的导出由动作 handler 给出具体结果，广播先于响应到达，
+      // 这里抢着报「完成」会在失败场景下闪一条误导文案
+      if (!msg.busy && !state.localAction) status('导出完成');
     }
   });
 
@@ -134,7 +141,12 @@ async function analyze(opts) {
   try {
     res = await sendToPage({
       type: 'INK_ANALYZE',
-      options: { includeComments: $('opt-comments').checked },
+      options: {
+        includeComments: $('opt-comments').checked,
+        // 「重新分析」按钮必须绕过页面侧提取缓存——URL 没变但内容变了时，
+        // 不带此标记的分析永远命中旧缓存，按钮等于摆设
+        forceRefresh: !!(opts && opts.force),
+      },
     });
   } catch (e) {
     res = { ok: false, error: e.message };
@@ -144,6 +156,9 @@ async function analyze(opts) {
     return showError('页面分析失败', friendlyError(res && res.error));
   }
   renderAnalysis(res);
+  // 页面侧仍有导出在跑（popup 关闭重开的场景）：恢复互斥忙态，
+  // 结束时页面会广播 INK_BUSY:false 解除
+  if (res.exporting) setBusy(true);
   if (quiet) status('');
 }
 
@@ -240,6 +255,7 @@ function exportOptions() {
 
 async function doDownload() {
   if (state.busy) return;
+  state.localAction = true;
   setBusy(true);
   try {
     if (state.imageStrategy === 'zip') {
@@ -255,6 +271,7 @@ async function doDownload() {
   } catch (e) {
     status('导出失败：' + e.message, true);
   } finally {
+    state.localAction = false;
     setBusy(false);
     $('btn-download-label').textContent = state.imageStrategy === 'zip' ? '下载 ZIP（含图片）' : '下载 Markdown';
   }
@@ -262,6 +279,7 @@ async function doDownload() {
 
 async function doCopy() {
   if (state.busy) return;
+  state.localAction = true;
   setBusy(true);
   try {
     const res = await sendToPage({
@@ -274,12 +292,14 @@ async function doCopy() {
   } catch (e) {
     status('复制失败：' + e.message, true);
   } finally {
+    state.localAction = false;
     setBusy(false);
   }
 }
 
 async function doPreview() {
   if (state.busy) return;
+  state.localAction = true;
   setBusy(true);
   try {
     const res = await sendToPage({
@@ -294,6 +314,7 @@ async function doPreview() {
   } catch (e) {
     status('预览失败：' + e.message, true);
   } finally {
+    state.localAction = false;
     setBusy(false);
   }
 }
@@ -302,6 +323,7 @@ async function doPreview() {
 
 async function doExportTree() {
   if (state.busy) return;
+  state.localAction = true;
   const btn = $('btn-tree');
   setBusy(true);
   btn.textContent = '🌳 抓取页面树中…';
@@ -313,6 +335,7 @@ async function doExportTree() {
   } catch (e) {
     status('页面树导出失败：' + e.message, true);
   } finally {
+    state.localAction = false;
     setBusy(false);
     btn.textContent = '🌳 导出页面树（含全部子页面）';
   }
@@ -328,7 +351,7 @@ function bindEvents() {
   });
   $('btn-reanalyze').addEventListener('click', (e) => {
     e.preventDefault();
-    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze();
+    if (IS_EXTENSION && state.tabId && !state.analyzing) analyze({ force: true });
   });
   $('link-batch').addEventListener('click', () => {
     if (IS_EXTENSION) chrome.tabs.create({ url: chrome.runtime.getURL('src/batch/batch.html') });

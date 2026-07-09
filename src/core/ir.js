@@ -216,7 +216,10 @@ var InkIR = window.InkIR || {
       let inWord = false;
       for (let i = 0; i < text.length; i++) {
         const c = text.charCodeAt(i);
-        if (c >= 0x4e00 && c <= 0x9fa5) {
+        // CJK 基本区+扩展A+兼容区、日文假名、谚文——每字计一词
+        if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3400 && c <= 0x4dbf) ||
+            (c >= 0xf900 && c <= 0xfaff) || (c >= 0x3040 && c <= 0x30ff) ||
+            (c >= 0xac00 && c <= 0xd7a3)) {
           words += 1;
           inWord = false;
         } else if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95) {

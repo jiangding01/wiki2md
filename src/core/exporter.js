@@ -50,6 +50,32 @@ var InkExporter = window.InkExporter || {
   },
 
   /**
+   * 带超时的 JSON 请求（唯一实现，Confluence REST 与飞书数据接口共用）：
+   * 挂起的接口请求会让分析/导出永远停在进度态，用户只能关页面——
+   * 图片抓取早有 20s 超时，接口调用同样必须有底线。
+   * 超时窗口必须覆盖到响应体读完：fetch() 在响应头到达时就 resolve，
+   * 若此时清掉定时器，body 阶段挂起的流会让 res.json() 无限等待
+   * （返回裸 Response 的版本踩过这个坑）。
+   * 返回 { ok, status, json }；非 2xx 不解析 body（错误页往往不是 JSON）。
+   */
+  async fetchJsonWithTimeout(url, options, timeoutMs) {
+    const ms = timeoutMs || 30_000;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const res = await fetch(url, Object.assign({}, options, { signal: ctrl.signal }));
+      return { ok: res.ok, status: res.status, json: res.ok ? await res.json() : null };
+    } catch (e) {
+      // AbortError 的原始文案不可读，翻译成能行动的话（会进 warnings 展示）
+      throw (e && e.name === 'AbortError')
+        ? new Error(`请求超时（${Math.round(ms / 1000)}s）`)
+        : e;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
+  /**
    * 简单并发池（唯一实现，图片抓取与页面树导出共用）：
    * 结果与输入顺序一致——zip 目录顺序、图片编号的确定性都依赖它。
    * fn 抛出的异常原样向上传播，需要「单项失败不拖垮全局」的调用方自行 try/catch。
