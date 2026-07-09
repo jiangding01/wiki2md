@@ -93,6 +93,17 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
 /* ---------- 动作区 ---------- */
 
 .action-bar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
+.opt-localize {
+  margin-right: auto; /* 靠左，与右侧状态/按钮分离 */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+.opt-localize input { accent-color: var(--cinnabar); }
 .batch-status { font-size: 13px; color: var(--ink-soft); }
 
 .btn-primary {

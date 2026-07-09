@@ -10,8 +10,21 @@ const PERMS = { permissions: ['tabs'], origins: ['<all_urls>'] };
 const $ = (id) => document.getElementById(id);
 
 let tabs = [];
+let filenameTemplate = '{title}';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // 图片本地化开关默认跟随全局图片策略（鉴权站点用户通常已设为 zip）
+  const settings = await InkSettings.merged();
+  filenameTemplate = settings.filenameTemplate || '{title}';
+  $('opt-localize').checked = settings.imageStrategy === 'zip';
+
+  // 各页面的抓图进度实时写到对应行的状态位
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    if (!msg || msg.type !== 'INK_PROGRESS' || !sender || !sender.tab) return;
+    const i = tabs.findIndex(t => t.id === sender.tab.id);
+    if (i !== -1) setState(i, msg.text, 'busy');
+  });
+
   const granted = await chrome.permissions.contains(PERMS);
   if (granted) {
     await showPicker();
@@ -108,11 +121,14 @@ async function ensureAwake(tab) {
 async function exportSelected() {
   const picked = selectedIndexes();
   const btn = $('btn-export');
+  const localize = $('opt-localize').checked;
   btn.disabled = true;
+  $('opt-localize').disabled = true;
 
   const zip = new JSZip();
   const usedNames = new Set();
   let okCount = 0;
+  let imageCount = 0;
 
   for (let k = 0; k < picked.length; k++) {
     const i = picked[k];
@@ -123,20 +139,42 @@ async function exportSelected() {
       await ensureAwake(tab);
       await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: tab.id })
         .then((r) => { if (!r || !r.ok) throw new Error((r && r.error) || '注入失败'); });
-      const res = await chrome.tabs.sendMessage(tab.id, {
-        // intent:'batch' → 与其它导出方式一致地记入导出历史
-        type: 'INK_EXPORT', action: 'markdown', options: { intent: 'batch' },
-      });
-      if (!res || !res.ok) throw new Error((res && res.error) || '提取失败');
 
-      let name = (res.filename || 'untitled.md').replace(/\.md$/, '');
+      // 先分析定文件名（提取结果有缓存，导出时不会重跑）——
+      // 图片要落在 assets/<md 同名目录>/，页面侧抓图前必须先知道最终唯一名，
+      // 事后改名就得回头替换 md 里的引用路径
+      const ana = await chrome.tabs.sendMessage(tab.id, { type: 'INK_ANALYZE', options: {} });
+      if (!ana || !ana.ok) throw new Error((ana && ana.error) || '分析失败');
+      // 与页面侧同一实现（buildFilename）算名，规则不漂移
+      const name = InkExporter
+        .buildFilename(filenameTemplate, { title: ana.title, url: tab.url }, 'md')
+        .replace(/\.md$/, '');
       let unique = name, n = 2;
       while (usedNames.has(unique)) unique = `${name}-${n++}`;
       usedNames.add(unique);
+
+      const res = await chrome.tabs.sendMessage(tab.id, {
+        // intent:'batch' → 与其它导出方式一致地记入导出历史
+        type: 'INK_EXPORT',
+        action: localize ? 'localized' : 'markdown',
+        options: { intent: 'batch', assetDir: `assets/${unique}` },
+      });
+      if (!res || !res.ok) throw new Error((res && res.error) || '提取失败');
+
       zip.file(`${unique}.md`, res.markdown);
+      for (const img of res.images || []) {
+        zip.file(img.path, img.base64, { base64: true });
+      }
+      imageCount += (res.images || []).length;
 
       okCount += 1;
-      setState(i, '✓', 'ok');
+      if (res.oversize) {
+        setState(i, '✓ 图片过大未打包（保留远程链接）', 'ok');
+      } else if (res.imageFailed) {
+        setState(i, `✓ ${res.imageFailed} 张图片失败（保留远程链接）`, 'ok');
+      } else {
+        setState(i, localize && res.images.length ? `✓ ${res.images.length} 图` : '✓', 'ok');
+      }
     } catch (e) {
       console.warn('[inkmark] batch item failed:', tab.url, e);
       setState(i, '✗ ' + shortErr(e.message), 'err');
@@ -153,8 +191,11 @@ async function exportSelected() {
   }
 
   $('batch-status').textContent =
-    `完成：成功 ${okCount} 个` + (okCount < picked.length ? `，失败 ${picked.length - okCount} 个` : '');
+    `完成：成功 ${okCount} 个` +
+    (imageCount ? `、打包图片 ${imageCount} 张` : '') +
+    (okCount < picked.length ? `，失败 ${picked.length - okCount} 个` : '');
   btn.disabled = false;
+  $('opt-localize').disabled = false;
 }
 
 function shortErr(msg) {
