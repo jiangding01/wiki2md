@@ -1,0 +1,29 @@
+# 摘墨 · e2e 全量断言（真实 Chromium 中跑「适配器 → IR → Markdown」全管线）
+#
+# 仓库本体零依赖：playwright 只是测试运行器，按需安装、不入库
+# （package*.json / pnpm-lock.yaml 均在 .gitignore）。
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 playwright 与 Chromium
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+      - name: 运行 e2e 全量断言
+        run: node test/e2e.js
