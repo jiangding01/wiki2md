@@ -192,8 +192,9 @@
 
   /**
    * Confluence 页面树批量导出：当前页 + 全部子孙页面 → 一个 ZIP（目录镜像层级）。
-   * 全程走同源 REST API，不打开任何标签页。评论不随树导出（每页多一次 API，
-   * 大空间下太慢）；失败页面写入 ZIP 内的「导出报告.md」，绝不静默丢失。
+   * 全程走同源 REST API，不打开任何标签页。评论跟随「导出评论」开关
+   * （每页多一次 API，关掉开关即可换速度）；失败页面写入 ZIP 内的
+   * 「导出报告.md」，绝不静默丢失。
    */
   const TREE_MAX_PAGES = 300;
 
@@ -245,7 +246,19 @@
       const results = await InkExporter.mapPool(children, 3, async (child) => {
         progress(`抓取页面：${child.title}`);
         try {
-          return { child, meta: await adapter.fetchPageHtml(child.id) };
+          const meta = await adapter.fetchPageHtml(child.id);
+          // 评论跟随「导出评论」开关（每页 +1 次 API）；
+          // 拉取失败只降级告警，绝不影响该页正文导出
+          let annotations = [];
+          let commentError = null;
+          if (settings.includeComments !== false) {
+            try {
+              annotations = await adapter.fetchCommentsFor(child.id);
+            } catch (e) {
+              commentError = e;
+            }
+          }
+          return { child, meta, annotations, commentError };
         } catch (e) {
           return { child, error: e };
         }
@@ -256,14 +269,19 @@
           continue;
         }
         const url = `${base}/pages/viewpage.action?pageId=${r.child.id}`;
-        nodes.push({ ir: adapter.htmlToIR(r.meta, url), path: cur.path, title: r.meta.title });
+        const ir = adapter.htmlToIR(r.meta, url);
+        ir.annotations = r.annotations || [];
+        if (r.commentError) {
+          failures.push(`「${r.meta.title}」评论拉取失败（${r.commentError.message}），仅导出正文`);
+        }
+        nodes.push({ ir, path: cur.path, title: r.meta.title });
         if (!capped) queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });
       }
     }
 
     progress('正在转换并打包…');
     const zip = new JSZip();
-    const renderOpts = Object.assign({}, settings, { includeComments: false });
+    const renderOpts = Object.assign({}, settings); // 评论呈现方式与单页导出一致
 
     // 第一步（顺序）：分配文件名——去重必须有序，才能保证 zip 目录确定性。
     // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——

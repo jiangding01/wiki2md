@@ -158,6 +158,11 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
   async _fetchComments() {
     const pageId = this._pageId();
     if (!pageId) return [];
+    return this.fetchCommentsFor(pageId);
+  },
+
+  /** 按 pageId 拉评论（当前页与页面树导出共用同一实现） */
+  async fetchCommentsFor(pageId) {
     try {
       return await this._fetchCommentsDeep(pageId);
     } catch (e) {
