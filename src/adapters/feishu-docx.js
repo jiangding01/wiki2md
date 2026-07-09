@@ -137,9 +137,9 @@ var InkFeishuDocx = window.InkFeishuDocx || {
     if (extraParams) {
       for (const [k, v] of Object.entries(extraParams)) u.searchParams.set(k, v);
     }
-    const res = await InkExporter.fetchWithTimeout(u.href, { credentials: 'include' });
+    const res = await InkExporter.fetchJsonWithTimeout(u.href, { credentials: 'include' });
     if (!res.ok) throw new Error(`client_vars HTTP ${res.status}`);
-    const body = await res.json();
+    const body = res.json;
     if (!body || body.code !== 0 || !body.data || !body.data.block_map) {
       throw new Error(`client_vars 返回异常（code=${body && body.code}）`);
     }
@@ -168,9 +168,9 @@ var InkFeishuDocx = window.InkFeishuDocx || {
       const u = new URL('/space/api/wiki/v2/tree/get_path/', location.origin);
       u.searchParams.set('wiki_token', m[1]);
       u.searchParams.set('with_space', 'true');
-      const res = await InkExporter.fetchWithTimeout(u.href, { credentials: 'include' });
+      const res = await InkExporter.fetchJsonWithTimeout(u.href, { credentials: 'include' });
       if (!res.ok) return null;
-      const spaceId = this._findKey(await res.json(), 'space_id');
+      const spaceId = this._findKey(res.json, 'space_id');
       if (!spaceId) return null;
       return { wiki_space_id: String(spaceId), container_type: 'wiki2.0', container_id: m[1] };
     } catch (e) {
@@ -246,11 +246,11 @@ var InkFeishuDocx = window.InkFeishuDocx || {
     let lastErr = null;
     for (const base of this._apiBases()) {
       try {
-        const res = await InkExporter.fetchWithTimeout(base + '/space/api/comment/batch', {
+        const res = await InkExporter.fetchJsonWithTimeout(base + '/space/api/comment/batch', {
           method: 'POST', credentials: 'include', headers, body,
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        const json = await res.json();
+        const json = res.json;
         if (!json || json.code !== 0 || !json.data) {
           throw new Error('code=' + (json && json.code));
         }

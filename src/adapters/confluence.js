@@ -242,10 +242,10 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
   /* ---------- 页面树批量导出（REST API，同源自动携带登录态） ---------- */
 
   async _apiGet(url) {
-    const res = await InkExporter.fetchWithTimeout(url,
+    const res = await InkExporter.fetchJsonWithTimeout(url,
       { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    return res.json;
   },
 
   /** 某页面的直接子页面（分页拉全） */
