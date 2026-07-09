@@ -59,7 +59,7 @@
   let cache = { ir: null, key: null };
   let inflight = { key: null, promise: null };
 
-  async function getIR(settings) {
+  async function getIR(settings, force) {
     // key 保留 hash：hash 路由的 SPA（docsify 等 domain/#/page 形态）切文章时只有
     // hash 变化，剥掉会脏读旧缓存；代价是点击页内锚点后首次导出会重新提取（可接受）
     const key = JSON.stringify({
@@ -67,10 +67,14 @@
       c: settings.includeComments,
       r: settings.customRules,
     });
-    if (cache.ir && cache.key === key) return cache.ir;
-    // 并发去重：popup 分析与快捷键导出同时触发时只跑一次提取
-    // （飞书滚动采集若并发执行会互相打架）
-    if (inflight.promise && inflight.key === key) return inflight.promise;
+    // force（「重新分析」按钮）绕过缓存与在途去重：页面内容变了而 URL 没变时，
+    // 这是用户拿到新结果的唯一通道
+    if (!force) {
+      if (cache.ir && cache.key === key) return cache.ir;
+      // 并发去重：popup 分析与快捷键导出同时触发时只跑一次提取
+      // （飞书滚动采集若并发执行会互相打架）
+      if (inflight.promise && inflight.key === key) return inflight.promise;
+    }
 
     inflight = {
       key,
@@ -109,7 +113,7 @@
 
   async function handleAnalyze(options) {
     const settings = await loadSettings(options);
-    const ir = await getIR(settings);
+    const ir = await getIR(settings, !!(options && options.forceRefresh));
     return {
       ok: true,
       adapter: ir._adapter,

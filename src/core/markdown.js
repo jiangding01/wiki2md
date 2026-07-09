@@ -392,6 +392,46 @@ var InkMarkdown = window.InkMarkdown || {
     return { markdown, orphans };
   },
 
+  /** fenced code 围栏行（``` / ~~~，可缩进 ≤3 空格，长度 ≥3） */
+  _fenceRe: /^ {0,3}([`~]{3,})/,
+
+  /**
+   * 围栏感知的正文清洗：零宽字符/BOM 删除、nbsp→空格、连续空行收敛。
+   * 逐行扫描并跳过 fenced code 内部——代码内容一个字符都不改
+   * （nbsp/零宽字符/连续空行在代码里可能是有意为之的内容）。
+   */
+  _cleanupOutsideCode(text) {
+    const out = [];
+    let fence = null; // 当前所在围栏的开栏标记；闭栏需同字符且不短于它
+    let blanks = 0;
+    for (const line of text.split('\n')) {
+      const m = line.match(this._fenceRe);
+      if (fence) {
+        out.push(line);
+        if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+        continue;
+      }
+      if (m) {
+        fence = m[1];
+        blanks = 0;
+        out.push(line);
+        continue;
+      }
+      const cleaned = line
+        .replace(/[\u200b\u200c\u200d\u200e\u200f\ufeff]/g, '')
+        .replace(/\u00a0/g, ' ');
+      if (!cleaned.trim()) {
+        blanks += 1;
+        if (blanks > 1) continue; // 连续空行只留一个（等价于 \n{3,} → \n\n）
+        out.push('');
+      } else {
+        blanks = 0;
+        out.push(cleaned);
+      }
+    }
+    return out.join('\n').trim();
+  },
+
   _indexOutsideCode(markdown, needle) {
     // 粗粒度：按 fenced code 分段，只在非代码段查找
     const parts = markdown.split(/(```[\s\S]*?```)/);
@@ -471,12 +511,9 @@ var InkMarkdown = window.InkMarkdown || {
     const td = this.createTurndown(opts);
     // 直接传 DOM 节点：innerHTML 序列化 + Turndown 内部再解析是两份多余的全量拷贝
     let body = td.turndown(workEl || '');
-    // 清理不可见字符（零宽空格/BOM/方向控制符）与 nbsp，收敛多余空行
-    body = body
-      .replace(/[\u200b\u200c\u200d\u200e\u200f\ufeff]/g, '')
-      .replace(/\u00a0/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    // 清理不可见字符（零宽空格/BOM/方向控制符）与 nbsp，收敛多余空行——
+    // 围栏感知，fenced code 内部原样保留
+    body = this._cleanupOutsideCode(body);
 
     let appendixAnns = [];
     if (opts.includeComments && ir.annotations.length) {
@@ -501,7 +538,8 @@ var InkMarkdown = window.InkMarkdown || {
       pieces.push(this.buildCommentAppendix(appendixAnns));
     }
 
-    return pieces.filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n') + '\n';
+    // 末次空行收敛同样要绕开代码块（body 里有 fenced code）
+    return this._cleanupOutsideCode(pieces.filter(Boolean).join('\n\n')) + '\n';
   },
 };
 
