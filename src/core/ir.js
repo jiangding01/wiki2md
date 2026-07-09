@@ -81,11 +81,15 @@ var InkIR = window.InkIR || {
     });
   },
 
-  /** 把所有资源链接绝对化（游离节点里的相对路径会丢上下文） */
+  /** 把所有资源链接绝对化（游离节点里的相对路径会丢上下文）。
+   *  顺带把 URL 里的字面括号转 %28/%29（百分号编码语义等价）：
+   *  md 内联链接 `](url)` 里未转义的 ) 会提前闭合链接，
+   *  图片本地化的收集正则也会在此截断——从源头消灭这类歧义。 */
   absolutizeUrls(root, baseUrl) {
     const base = baseUrl || location.href;
+    const escapeParens = (u) => u.replace(/\(/g, '%28').replace(/\)/g, '%29');
     root.querySelectorAll('img[src]').forEach((img) => {
-      try { img.setAttribute('src', new URL(img.getAttribute('src'), base).href); } catch (e) { /* 保留原值 */ }
+      try { img.setAttribute('src', escapeParens(new URL(img.getAttribute('src'), base).href)); } catch (e) { /* 保留原值 */ }
     });
     root.querySelectorAll('a[href]').forEach((a) => {
       const href = a.getAttribute('href');
@@ -96,7 +100,7 @@ var InkIR = window.InkIR || {
         a.removeAttribute('href');
         return;
       }
-      try { a.setAttribute('href', new URL(href, base).href); } catch (e) { /* 保留原值 */ }
+      try { a.setAttribute('href', escapeParens(new URL(href, base).href)); } catch (e) { /* 保留原值 */ }
     });
   },
 

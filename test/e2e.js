@@ -389,6 +389,13 @@ async function runPipeline(page, fixture, options) {
         if (url.includes('/content/300?expand')) return json({ title: '孙页面B', body: { export_view: {
           value: '<h2>小节</h2><p>B 的正文</p><p><img src="https://wiki.example.com/download/attachments/300/b-img.png?api=v2&amp;x=1"></p>' } } });
         if (url.includes('/content/400?expand')) return Promise.resolve({ ok: false, status: 500 });
+        if (url.includes('/descendant/comment')) {
+          return json({ results: [{
+            id: 'tc1', type: 'comment', ancestors: [],
+            body: { view: { value: '<p>树评论内容</p>' } },
+            history: { createdBy: { displayName: '树评人' } },
+          }] });
+        }
         if (url.includes('b-img.png')) {
           return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['x'], { type: 'image/png' })) });
         }
@@ -400,11 +407,20 @@ async function runPipeline(page, fixture, options) {
 
       const res = await window.__inkmark.handleExportTree({ includeComments: false, frontMatter: false });
       if (!captured) return { res, files: [] };
+      const filename = captured.filename;
       const zip = await JSZip.loadAsync(captured.blob);
       const files = Object.keys(zip.files).filter(n => !zip.files[n].dir).sort();
       const bContent = await (zip.file('支付网关重构方案/子页面A/孙页面B.md') || { async: () => '' }).async('string');
       const report = await (zip.file('导出报告.md') || { async: () => '' }).async('string');
-      return { res, files, bContent, report, filename: captured.filename };
+
+      // 变体：打开「导出评论」——每页评论随树导出（descendant mock 供所有页命中）
+      captured = null;
+      const resC = await window.__inkmark.handleExportTree({ includeComments: true, frontMatter: false });
+      const zipC = captured && await JSZip.loadAsync(captured.blob);
+      const bWithComments = zipC
+        ? await (zipC.file('支付网关重构方案/子页面A/孙页面B.md') || { async: () => '' }).async('string')
+        : '';
+      return { res, files, bContent, report, filename, resC, bWithComments };
     });
     assert(tree.res.ok && tree.res.pages === 3, '根页 + 子 + 孙共 3 页导出成功', JSON.stringify(tree.res));
     assert(tree.files.includes('支付网关重构方案.md') &&
@@ -421,6 +437,11 @@ async function runPipeline(page, fixture, options) {
       '子页面图片进「assets/<页面名>/」分组目录（每层仅一个 assets）', tree.files.join(', '));
     assert(tree.bContent.includes('](assets/孙页面B/img-001.png)'),
       'md 内图片改为相对引用，解压即可离线查看', tree.bContent);
+    assert(!tree.bContent.includes('💬'), '默认关闭时子页不含评论区');
+    assert(tree.resC && tree.resC.ok &&
+           tree.bWithComments.includes('## 💬 评论') && tree.bWithComments.includes('树评论内容') &&
+           tree.bWithComments.includes('树评人'),
+      '打开「导出评论」后子页评论随树导出', tree.bWithComments.slice(-200));
   }
 
   /* ---------- 用例 14：图片本地化覆盖 HTML 块 & 鉴权站点标记 ---------- */
@@ -793,6 +814,53 @@ async function runPipeline(page, fixture, options) {
     assert(r.fm.includes('title: "斜杠\\\\"'), 'YAML 反斜杠转义', r.fm.split('\n')[1]);
     assert(r.split.length === 3 && r.split[0] === ':is(.a, .b)' && r.split[2] === '[data-x="1,2"]',
       'removeSel 按顶层逗号拆分（:is/属性值里的逗号不拆）', JSON.stringify(r.split));
+  }
+
+  /* ---------- 用例 15：导出优化（批量图片本地化通道 / URL 括号转义） ---------- */
+  console.log('\n[15] 导出优化 · localized 动作 / blobToBase64 / URL 括号');
+  {
+    const page3 = await browser.newPage();
+    await page3.goto('file://' + path.join(ROOT, 'test/fixtures', 'generic-article.html'));
+    for (const f of CONTENT_FILES) {
+      await page3.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const r = await page3.evaluate(async () => {
+      const out = {};
+      // localizeImages 支持 data: URI 落盘；blobToBase64 供消息通道回传
+      const loc = await InkExporter.localizeImages(
+        '![a](data:image/png;base64,iVBORw0KGgo=)', null, 'assets/示例');
+      const first = loc.files.entries().next().value;
+      out.locPath = first && first[0];
+      out.locMd = loc.markdown;
+      out.b64 = first ? await InkExporter.blobToBase64(first[1]) : '';
+      // localized 动作契约：markdown/images/imageFailed/oversize 齐备
+      // （fixture 的图是 file:// 协议，不在收集范围内——原样保留、不计失败）
+      const act = await window.__inkmark.handleExport('localized',
+        { frontMatter: false, includeComments: false, assetDir: 'assets/t', keepHistory: false });
+      out.action = {
+        ok: act.ok,
+        hasArrays: Array.isArray(act.images),
+        failed: act.imageFailed,
+        oversize: act.oversize,
+        hasMd: typeof act.markdown === 'string' && act.markdown.length > 0,
+      };
+      // absolutizeUrls：URL 字面括号 → %28/%29（md 内联链接不再被 ) 提前闭合）
+      const div = document.createElement('div');
+      div.innerHTML = '<a href="https://x.com/a(1).html">t</a><img src="https://x.com/i(2).png">';
+      InkIR.absolutizeUrls(div, 'https://x.com/');
+      out.href = div.querySelector('a').getAttribute('href');
+      out.src = div.querySelector('img').getAttribute('src');
+      return out;
+    });
+    await page3.close();
+    assert(r.locPath === 'assets/示例/img-001.png', 'data: URI 图片落盘到指定 assetDir', r.locPath);
+    assert(r.locMd.includes('](assets/示例/img-001.png)'), 'md 引用改写为相对路径', r.locMd);
+    assert(/^[A-Za-z0-9+/]+=*$/.test(r.b64) && r.b64.length > 0, 'blobToBase64 输出合法 base64', r.b64);
+    assert(r.action.ok && r.action.hasArrays && r.action.hasMd &&
+           r.action.failed === 0 && r.action.oversize === false,
+      'localized 动作契约完整（file:// 图不在收集范围，原样保留）', JSON.stringify(r.action));
+    assert(r.href === 'https://x.com/a%281%29.html', 'a href 括号转义为 %28/%29', r.href);
+    assert(r.src === 'https://x.com/i%282%29.png', 'img src 括号转义为 %28/%29', r.src);
   }
 
   await browser.close();
