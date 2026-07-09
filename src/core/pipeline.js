@@ -246,19 +246,20 @@
       const results = await InkExporter.mapPool(children, 3, async (child) => {
         progress(`抓取页面：${child.title}`);
         try {
-          const meta = await adapter.fetchPageHtml(child.id);
-          // 评论跟随「导出评论」开关（每页 +1 次 API）；
-          // 拉取失败只降级告警，绝不影响该页正文导出
-          let annotations = [];
+          // 评论跟随「导出评论」开关（每页 +1 次 API）；与正文并行拉取——
+          // 二者互不依赖，串行会让大空间的抓取墙钟接近翻倍。
+          // 3 路池 × 每页 2 请求 = 6 在途，贴着浏览器同主机连接上限，不超。
+          // 评论失败只降级告警，绝不影响该页正文导出。
           let commentError = null;
-          if (settings.includeComments !== false) {
-            try {
-              annotations = await adapter.fetchCommentsFor(child.id);
-            } catch (e) {
-              commentError = e;
-            }
-          }
-          return { child, meta, annotations, commentError };
+          const commentState = {};
+          const commentsP = settings.includeComments !== false
+            ? adapter.fetchCommentsFor(child.id, commentState)
+                .catch((e) => { commentError = e; return []; })
+            : Promise.resolve([]);
+          const [meta, annotations] = await Promise.all([
+            adapter.fetchPageHtml(child.id), commentsP,
+          ]);
+          return { child, meta, annotations, commentError, commentState };
         } catch (e) {
           return { child, error: e };
         }
@@ -270,9 +271,11 @@
         }
         const url = `${base}/pages/viewpage.action?pageId=${r.child.id}`;
         const ir = adapter.htmlToIR(r.meta, url);
-        ir.annotations = r.annotations || [];
+        ir.annotations = r.annotations;
         if (r.commentError) {
           failures.push(`「${r.meta.title}」评论拉取失败（${r.commentError.message}），仅导出正文`);
+        } else if (r.commentState.truncated) {
+          failures.push(`「${r.meta.title}」评论超出拉取上限，已截断`);
         }
         nodes.push({ ir, path: cur.path, title: r.meta.title });
         if (!capped) queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });

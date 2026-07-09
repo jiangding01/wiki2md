@@ -71,7 +71,11 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
 
     if (opts.includeComments !== false) {
       try {
-        ir.annotations = await this._fetchComments();
+        const state = {};
+        ir.annotations = await this._fetchComments(state);
+        if (state.truncated) {
+          ir.warnings.push('评论数量超出单次拉取上限，已截断（导出的评论不完整）。');
+        }
       } catch (e) {
         ir.warnings.push('评论拉取失败（' + (e.message || e) + '），仅导出正文。');
       }
@@ -155,19 +159,21 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
     return i >= 0 ? location.origin + '/wiki' : location.origin;
   },
 
-  async _fetchComments() {
+  async _fetchComments(state) {
     const pageId = this._pageId();
     if (!pageId) return [];
-    return this.fetchCommentsFor(pageId);
+    return this.fetchCommentsFor(pageId, state);
   },
 
-  /** 按 pageId 拉评论（当前页与页面树导出共用同一实现） */
-  async fetchCommentsFor(pageId) {
+  /** 按 pageId 拉评论（当前页与页面树导出共用同一实现）。
+   *  state 为可选出参：拉取触达分页上限被截断时置 state.truncated=true，
+   *  调用方据此告警——「绝不静默丢数据」。 */
+  async fetchCommentsFor(pageId, state) {
     try {
-      return await this._fetchCommentsDeep(pageId);
+      return await this._fetchCommentsDeep(pageId, state);
     } catch (e) {
       // descendant 端点异常（老版本实例等）：回退 child 通道（仅一层回复）
-      return this._fetchCommentsShallow(pageId);
+      return this._fetchCommentsShallow(pageId, state);
     }
   },
 
@@ -175,8 +181,11 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
    * descendant/comment 一次拿全所有层级的评论——child/comment + expand 只能
    * 展开一层回复，Server/DC 上更深的回复会被静默丢掉。回复不论嵌套多深都
    * 收进顶层评论的 replies（导出呈现本就只有一层缩进），顺序保持接口返回序。
+   * 官方语义 descendants.comment 等同 children.comment（不穿越子页面），
+   * 但版本行为历史上有差异——ancestors 里挂着其他页面的评论一律跳过
+   * （防御兜底，正常实例上是 no-op）。
    */
-  async _fetchCommentsDeep(pageId) {
+  async _fetchCommentsDeep(pageId, state) {
     const base = this._baseUrl();
     let url = `${base}/rest/api/content/${pageId}/descendant/comment` +
       `?expand=body.view,history,extensions.inlineProperties,ancestors&limit=50`;
@@ -188,16 +197,21 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
         ? ((data._links.base || base) + data._links.next)
         : null;
     }
+    if (url && state) state.truncated = true; // 还有下一页但触达上限：截断
     const isComment = (a) => a && a.type === 'comment';
+    const isForeign = (c) => (c.ancestors || [])
+      .some(a => a && a.type === 'page' && String(a.id) !== String(pageId));
     const topById = new Map();
     const out = [];
     for (const c of results) {
+      if (isForeign(c)) continue; // 其他页面的评论（防御兜底）
       if ((c.ancestors || []).some(isComment)) continue; // 回复稍后归组
       const ann = this._toAnnotation(c);
       topById.set(c.id, ann);
       out.push(ann);
     }
     for (const c of results) {
+      if (isForeign(c)) continue;
       const ancs = (c.ancestors || []).filter(isComment);
       if (!ancs.length) continue;
       const ann = this._toAnnotation(c);
@@ -210,7 +224,7 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
   },
 
   /** 回退通道：child/comment + 一层 expand（descendant 不可用时的旧行为） */
-  async _fetchCommentsShallow(pageId) {
+  async _fetchCommentsShallow(pageId, state) {
     const base = this._baseUrl();
     let url = `${base}/rest/api/content/${pageId}/child/comment` +
       `?expand=body.view,history,extensions.inlineProperties,children.comment.body.view,children.comment.history&limit=50`;
@@ -223,6 +237,7 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
         ? ((data._links.base || base) + data._links.next)
         : null;
     }
+    if (url && state) state.truncated = true;
     return out;
   },
 
