@@ -1,20 +1,19 @@
 /**
- * 摘墨 · 飞书文档适配器（实验性）
+ * 摘墨 · 飞书文档适配器
  *
- * 飞书 docx 使用虚拟滚动：长文档只有视口附近的 block 在 DOM 中。
- * 策略：自动滚动整篇文档，按 data-block-id 去重收集所有 block 的快照，
- * 最后按首次出现顺序拼装。滚动期间页面会自动翻页，属预期行为。
- *
- * 已知限制（badge = experimental，UI 上明确告知用户）：
- * - 表格类 block（sheet 嵌入）是 canvas 渲染，导出为占位提示
- * - 飞书前端类名随版本变化，选择器可能需要跟进
+ * 双通道策略：
+ * 1. 接口精配（首选）：走页面自身的 client_vars 数据接口一次拿全量 block，
+ *    精确重建文档结构（实现在 feishu-docx.js），成功时徽章升级为「精配」。
+ * 2. 滚动采集（回退）：飞书 docx 使用虚拟滚动，长文档只有视口附近的 block
+ *    在 DOM 中。自动滚动整篇文档，按 data-block-id 去重收集快照拼装。
+ *    接口形态随飞书版本变化时兜底，badge 保持 experimental 明示用户。
  */
 
 // 幂等声明：重复注入时复用首次实例（const 重声明会抛错；裸 var 重建会清空注册表等内部状态）
 var FeishuAdapter = window.FeishuAdapter || {
   id: 'feishu',
   name: '飞书文档',
-  badge: 'experimental',
+  badge: 'experimental', // 静态默认值；接口采集成功时按次覆盖为 precise（见 extract）
   authImages: true, // 图片需登录态，远程链接在本地 md 里打不开
 
   match(loc) {
@@ -22,10 +21,26 @@ var FeishuAdapter = window.FeishuAdapter || {
       /\/(docx|docs|wiki)\//.test(loc.pathname);
   },
 
-  async extract() {
+  async extract(options) {
+    // 通道一：client_vars 接口精配（快且完整，不用滚动页面）
+    let interfaceError = null;
+    try {
+      const token = InkFeishuDocx.docToken();
+      if (!token) throw new Error('页面上未找到文档 token');
+      const ir = await InkFeishuDocx.extract(token, options);
+      ir.badge = 'precise'; // 本次提取实际走了接口，徽章升级（pipeline 按 IR 覆盖）
+      return ir;
+    } catch (e) {
+      interfaceError = e;
+      console.warn('[inkmark] feishu client_vars 采集失败，回退滚动采集:', e);
+    }
+
+    // 通道二：滚动采集回退
     const scrollHost = this._findScrollHost();
     const blocks = new Map(); // block-id → outerHTML（首次出现顺序即文档顺序）
-    const warnings = [];
+    const warnings = [
+      `接口采集失败（${interfaceError.message}），已回退滚动采集，复杂块（表格/图表）可能降级。`,
+    ];
 
     const harvest = () => {
       document.querySelectorAll('[data-block-id]').forEach((el) => {

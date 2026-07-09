@@ -26,6 +26,7 @@ const CONTENT_FILES = [
   'src/adapters/generic.js',
   'src/adapters/custom.js',
   'src/adapters/confluence.js',
+  'src/adapters/feishu-docx.js',
   'src/adapters/feishu.js',
   'src/adapters/cn-sites.js',
   'src/adapters/intl-sites.js',
@@ -108,6 +109,10 @@ async function runPipeline(page, fixture, options) {
           InkIR.annotation({
             kind: 'inline', anchorText: '支付网关', author: '陈默',
             time: '2026-07-05', content: '这里建议写成「统一收单网关」',
+            replies: [
+              InkIR.annotation({ author: '苏澄', time: '2026-07-06', content: '同意，已修改' }),
+              InkIR.annotation({ author: '陈默', content: '收到' }),
+            ],
           }),
           InkIR.annotation({
             kind: 'page', author: '赵砚', time: '2026-07-06',
@@ -125,6 +130,9 @@ async function runPipeline(page, fixture, options) {
     assert(md.withHighlight.includes('==支付网关==[^1]'), '划线原文高亮 + 脚注（默认）');
     assert(md.noHighlight.includes('支付网关[^1]') && !md.noHighlight.includes('=='), '关闭高亮：仅脚注');
     assert(md.withHighlight.includes('[^1]: **陈默 · 2026-07-05**：这里建议写成'), '脚注内容完整');
+    assert(/\[\^1\]: [^\n]+ {2}\n {4}↳ \*\*苏澄 · 2026-07-06\*\*：同意，已修改 {2}\n {4}↳ \*\*陈默\*\*：收到/.test(md.withHighlight),
+      '脚注内回复逐行缩进展示层级（续行缩进 + 行尾双空格硬换行，缺一渲染时都会并回一行）',
+      JSON.stringify(md.withHighlight.split('[^1]:')[1]));
     assert(md.withHighlight.includes('## 💬 评论'), '页面评论进附录');
     assert(md.withHighlight.includes('> > **林晚秋**'), '评论回复嵌套引用');
     assert(md.fmTags.includes('tags: [工作, wiki]'),
@@ -549,6 +557,199 @@ async function runPipeline(page, fixture, options) {
     });
     assert(xhtmlStats.images === 1 && xhtmlStats.tables === 1 && xhtmlStats.codeBlocks === 1,
       'XHTML 文档中图片/表格/代码块分类正确', JSON.stringify(xhtmlStats));
+  }
+
+  /* ---------- 用例 17：飞书接口化采集（client_vars mock 全链路） ---------- */
+  console.log('\n[17] 飞书接口精配 · block 重建 / easysync 解码 / 分页 / 回退');
+  {
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/feishu-docx.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const feishu = await page.evaluate(async () => {
+      // easysync 文本构造器：text + 属性操作串 + 属性池
+      const T = (str, ops, pool) => ({
+        apool: { nextNum: Object.keys(pool || {}).length, numToAttrib: pool || {} },
+        initialAttributedTexts: { attribs: { 0: ops || '' }, text: { 0: str } },
+      });
+      const B = (type, extra) => ({ data: Object.assign({ type, parent_id: 'FEISHUROOT123', children: [] }, extra) });
+
+      const chunk1 = {
+        id: 'FEISHUROOT123',
+        has_more: true,
+        cursor: '',
+        next_cursors: ['CUR2'],
+        block_map: {
+          FEISHUROOT123: B('page', {
+            text: T('接口测试文档'),
+            comments: ['CMT2'], // 全文评论挂在 page 根块
+            children: ['h2a', 'txt1', 'bul1', 'bul2', 'ord1', 'ord2', 'quo1', 'cod1',
+              'div1', 'tab1', 'isv1', 'img1', 'todo1', 'miss1'],
+          }),
+          h2a: B('heading2', { text: T('第一节') }),
+          // '普通'(素) + '粗体'(bold) + '码'(inlineCode) + '链接'(link)
+          txt1: B('text', {
+            text: T('普通粗体码链接', '+2*0+2*1+1*2+2', {
+              0: ['bold', 'true'], 1: ['inlineCode', 'true'],
+              2: ['link', encodeURIComponent('https://example.com/x')],
+            }),
+          }),
+          bul1: B('bullet', { text: T('无序一'), children: ['bul1a'] }),
+          bul1a: B('bullet', { text: T('嵌套项'), parent_id: 'bul1' }),
+          bul2: B('bullet', { text: T('无序二') }),
+        },
+      };
+      const chunk2 = {
+        id: 'FEISHUROOT123',
+        has_more: false,
+        cursor: '',
+        next_cursors: [],
+        block_map: {
+          ord1: B('ordered', { text: T('有序一'), seq: '1', comments: ['CMT1'] }),
+          ord2: B('ordered', { text: T('有序二'), seq: '2' }),
+          quo1: B('quote', { text: T('引用内容') }),
+          cod1: B('code', { text: T('const a = 1;\nconst b = 2;'), language: 'JavaScript' }),
+          div1: B('divider', {}),
+          tab1: B('table', {
+            columns_id: ['colA', 'colB'],
+            rows_id: ['row1', 'row2', 'row3'],
+            cell_set: {
+              row1colA: { merge_info: { row_span: 1, col_span: 1 }, block_id: 'c11' },
+              row1colB: { merge_info: { row_span: 1, col_span: 1 }, block_id: 'c12' },
+              row2colA: { merge_info: { row_span: 2, col_span: 1 }, block_id: 'c21' },
+              row2colB: { merge_info: { row_span: 1, col_span: 1 }, block_id: 'c22' },
+              row3colA: { merge_info: { row_span: 1, col_span: 1 }, block_id: 'c31' },
+              row3colB: { merge_info: { row_span: 1, col_span: 1 }, block_id: 'c32' },
+            },
+          }),
+          c11: B('table_cell', { children: ['t11'] }), t11: B('text', { text: T('表头甲') }),
+          c12: B('table_cell', { children: ['t12'] }), t12: B('text', { text: T('表头乙') }),
+          c21: B('table_cell', { children: ['t21'] }), t21: B('text', { text: T('跨行格') }),
+          c22: B('table_cell', { children: ['t22'] }), t22: B('text', { text: T('乙2') }),
+          c31: B('table_cell', { children: [] }),
+          c32: B('table_cell', { children: ['t32'] }), t32: B('text', { text: T('乙3') }),
+          isv1: B('isv', {
+            block_type_id: 'blk_631fefbbae02400430b8f9f4',
+            data: { data: 'graph TD\n  A-->B', view: 'chart' },
+          }),
+          img1: B('image', { token: 'IMGTOKEN99' }),
+          todo1: B('todo', { text: T('待办事项'), done: false }),
+          // miss1 故意不在任何 chunk 里 → 触发「内容块缺失」告警
+        },
+      };
+
+      // 评论接口（comment/batch）mock：CMT1 = 划线评论（已解决），CMT2 = 全文评论带回复
+      const commentData = {
+        comments: {
+          CMT1: {
+            comment_id: 'CMT1', is_whole: 0, finish: 1, delete_flag: 0, quote: '有序一',
+            comment_list: [{ name: '甲', create_time: '2026-07-01 10:00:00', delete_flag: 0,
+              content: '这里建议改一下' }],
+          },
+          CMT2: {
+            comment_id: 'CMT2', is_whole: 1, finish: 0, delete_flag: 0, quote: '',
+            comment_list: [
+              { name: '乙', create_time: '2026-07-01 11:00:00', delete_flag: 0, content: '总体 ok' },
+              { name: '丙', create_time: '2026-07-01 11:05:00', delete_flag: 0,
+                content: '<at type="0" token="x">@蒋玲琳</at> 跟进一下 A&#x2F;B 项' },
+            ],
+          },
+        },
+      };
+
+      const fetched = [];
+      let commentBody = '';
+      window.fetch = (url, init) => {
+        url = String(url);
+        fetched.push(url);
+        if (url.includes('/space/api/comment/batch')) {
+          commentBody = String((init && init.body) || '');
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ code: 0, data: commentData }) });
+        }
+        if (!url.includes('/space/api/docx/pages/client_vars')) {
+          return Promise.resolve({ ok: false, status: 404 });
+        }
+        const data = url.includes('cursor=CUR2') ? chunk2 : chunk1;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ code: 0, data }) });
+      };
+
+      const ir = await FeishuAdapter.extract();
+      const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: false });
+      const mdComments = InkMarkdown.render(ir, {
+        frontMatter: false, includeComments: true, commentStyle: 'both',
+      });
+
+      // 接口失败 → 回退滚动采集（本页无滚动容器，直接收割可见 block）
+      window.fetch = () => Promise.resolve({ ok: false, status: 403 });
+      const irFallback = await FeishuAdapter.extract();
+
+      return {
+        fetched,
+        badge: ir.badge,
+        title: ir.title,
+        siteName: ir.siteName,
+        warnings: ir.warnings,
+        md,
+        mdComments,
+        commentBody,
+        annotations: ir.annotations,
+        fallbackBadge: irFallback.badge,
+        fallbackWarnings: irFallback.warnings,
+        fallbackText: irFallback.contentEl.textContent,
+      };
+    });
+    const cvCalls = feishu.fetched.filter(u => u.includes('client_vars'));
+    assert(cvCalls.length === 2 && cvCalls[1].includes('cursor=CUR2'),
+      'next_cursors 驱动分页拉取（两个 chunk）', feishu.fetched.join('\n    '));
+    assert(cvCalls[0].includes('id=FEISHUROOT123') && cvCalls[0].includes('mode=7'),
+      'token 来自 DOM data-record-id，参数形态与线上一致', cvCalls[0]);
+    assert(feishu.badge === 'precise', '接口成功 → 徽章按次升级为 precise', feishu.badge);
+    assert(feishu.title === '接口测试文档' && feishu.siteName === '飞书文档',
+      '标题取自 page 根块文本', feishu.title);
+    assert(feishu.md.includes('## 第一节'), 'heading2 → ##');
+    assert(feishu.md.includes('**粗体**') && feishu.md.includes('`码`') &&
+      feishu.md.includes('[链接](https://example.com/x)'),
+      'easysync 属性解码：粗体/行内代码/链接（URL 解码）', feishu.md.split('\n').find(l => l.includes('普通')));
+    assert(/无序一[\s\S]{0,24}- {1,3}嵌套项/.test(feishu.md), '子块嵌套列表正确缩进');
+    assert(/1\. {1,3}有序一/.test(feishu.md) && /2\. {1,3}有序二/.test(feishu.md),
+      'ordered（seq）→ 有序列表');
+    assert(feishu.md.includes('> 引用内容'), 'quote → 引用块');
+    assert(feishu.md.includes('```javascript\nconst a = 1;\nconst b = 2;\n```'),
+      '代码块保留多行原文 + 语言标注');
+    assert(/\n---\n/.test(feishu.md), 'divider → 水平线');
+    assert(feishu.md.includes('| 表头甲 | 表头乙 |'), '表格 rows×cols 网格重建（首行提升表头）');
+    assert(feishu.md.includes('| 跨行格 | 乙2 |') && /\|\s+\|\s*乙3\s*\|/.test(feishu.md),
+      'merge_info row_span → rowspan → 网格展开补空格', feishu.md.split('\n').filter(l => l.startsWith('|')).join('\n    '));
+    assert(feishu.md.includes('```mermaid\ngraph TD'), 'isv 图表块 → mermaid 围栏代码');
+    assert(feishu.md.includes('/space/api/box/stream/download/all/IMGTOKEN99'),
+      '图片块 → box 下载通道 URL（配合 authImages 本地打包）');
+    assert(feishu.md.includes('[ ] 待办事项'), 'todo → GFM 任务列表');
+    assert(feishu.warnings.some(w => w.includes('1 个内容块未在接口数据中返回')),
+      '分页缺失的块计入告警，不静默丢失', feishu.warnings.join(' | '));
+    assert(feishu.commentBody.includes('obj_type=22') &&
+      feishu.commentBody.includes('token=FEISHUROOT123') &&
+      feishu.commentBody.includes('comment_ids=CMT2') && feishu.commentBody.includes('comment_ids=CMT1'),
+      '评论 id 从块的 comments 字段收集，batch 参数形态与线上一致', feishu.commentBody);
+    assert(feishu.annotations.length === 2 &&
+      feishu.annotations.some(a => a.kind === 'inline') &&
+      feishu.annotations.find(a => a.kind === 'page').replies.length === 1,
+      '划线 + 全文评论各一条，回复嵌套', JSON.stringify(feishu.annotations));
+    assert(feishu.mdComments.includes('==有序一==[^1]'),
+      '划线评论：quote 锚定原文 → ==高亮==[^脚注]');
+    assert(feishu.mdComments.includes('[^1]: **甲 · 2026-07-01 10:00:00 · 已解决**：这里建议改一下'),
+      '脚注内容完整（含「已解决」状态）', feishu.mdComments.split('\n').find(l => l.startsWith('[^1]')));
+    assert(feishu.mdComments.includes('## 💬 评论') && feishu.mdComments.includes('总体 ok'),
+      '全文评论进文末评论区');
+    assert(feishu.mdComments.includes('@蒋玲琳 跟进一下 A/B 项') && !feishu.mdComments.includes('<at'),
+      '评论富文本净化：<at> 提及转 @名字、HTML 实体解码',
+      feishu.mdComments.split('\n').find(l => l.includes('蒋玲琳')));
+    assert(!feishu.md.includes('[^1]') && !feishu.md.includes('💬'),
+      'includeComments=false 时不织入脚注、无评论区');
+    assert(feishu.fallbackBadge === undefined &&
+      feishu.fallbackWarnings.some(w => w.includes('回退滚动采集')),
+      '接口失败 → 回退滚动采集并明示告警', feishu.fallbackWarnings.join(' | '));
+    assert(feishu.fallbackText.includes('滚动回退路径会看到的可见段落'),
+      '回退路径仍能导出可见内容');
   }
 
   await browser.close();

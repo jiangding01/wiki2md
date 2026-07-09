@@ -88,7 +88,9 @@
         progress(`正在提取（${adapter.name}）…`);
         const ir = await adapter.extract(settings);
         ir._adapter = {
-          id: adapter.id, name: adapter.name, badge: adapter.badge,
+          id: adapter.id, name: adapter.name,
+          // 适配器可按本次提取实际走的路径覆盖徽章（飞书：接口成功=precise，回退滚动=experimental）
+          badge: ir.badge || adapter.badge,
           authImages: !!adapter.authImages,
         };
         InkIR.restoreMath(ir.contentEl || document.createElement('div'));

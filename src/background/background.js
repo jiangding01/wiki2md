@@ -18,6 +18,7 @@ const CONTENT_FILES = [
   'src/adapters/generic.js',
   'src/adapters/custom.js',
   'src/adapters/confluence.js',
+  'src/adapters/feishu-docx.js',
   'src/adapters/feishu.js',
   'src/adapters/cn-sites.js',
   'src/adapters/intl-sites.js',
