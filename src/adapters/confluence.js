@@ -158,15 +158,61 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
   async _fetchComments() {
     const pageId = this._pageId();
     if (!pageId) return [];
+    try {
+      return await this._fetchCommentsDeep(pageId);
+    } catch (e) {
+      // descendant 端点异常（老版本实例等）：回退 child 通道（仅一层回复）
+      return this._fetchCommentsShallow(pageId);
+    }
+  },
+
+  /**
+   * descendant/comment 一次拿全所有层级的评论——child/comment + expand 只能
+   * 展开一层回复，Server/DC 上更深的回复会被静默丢掉。回复不论嵌套多深都
+   * 收进顶层评论的 replies（导出呈现本就只有一层缩进），顺序保持接口返回序。
+   */
+  async _fetchCommentsDeep(pageId) {
+    const base = this._baseUrl();
+    let url = `${base}/rest/api/content/${pageId}/descendant/comment` +
+      `?expand=body.view,history,extensions.inlineProperties,ancestors&limit=50`;
+    const results = [];
+    for (let page = 0; url && page < 20; page++) {
+      const data = await this._apiGet(url);
+      results.push(...(data.results || []));
+      url = (data._links && data._links.next)
+        ? ((data._links.base || base) + data._links.next)
+        : null;
+    }
+    const isComment = (a) => a && a.type === 'comment';
+    const topById = new Map();
+    const out = [];
+    for (const c of results) {
+      if ((c.ancestors || []).some(isComment)) continue; // 回复稍后归组
+      const ann = this._toAnnotation(c);
+      topById.set(c.id, ann);
+      out.push(ann);
+    }
+    for (const c of results) {
+      const ancs = (c.ancestors || []).filter(isComment);
+      if (!ancs.length) continue;
+      const ann = this._toAnnotation(c);
+      // 祖先链里找到属于本页顶层的那条（不假设 ancestors 的排列方向）
+      const top = ancs.map(a => topById.get(a.id)).find(Boolean);
+      if (top) top.replies.push(ann);
+      else out.push(ann); // 祖先缺失的孤儿评论：顶层兜底，绝不静默丢弃
+    }
+    return out;
+  },
+
+  /** 回退通道：child/comment + 一层 expand（descendant 不可用时的旧行为） */
+  async _fetchCommentsShallow(pageId) {
     const base = this._baseUrl();
     let url = `${base}/rest/api/content/${pageId}/child/comment` +
       `?expand=body.view,history,extensions.inlineProperties,children.comment.body.view,children.comment.history&limit=50`;
     const out = [];
     // 分页拉全：大文档的评论可能远超一页
     for (let page = 0; url && page < 10; page++) {
-      const res = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await this._apiGet(url);
       out.push(...(data.results || []).map(c => this._toAnnotation(c)));
       url = (data._links && data._links.next)
         ? ((data._links.base || base) + data._links.next)

@@ -336,9 +336,10 @@ var InkMarkdown = window.InkMarkdown || {
     });
   },
 
-  /** YAML Front Matter。值内换行会破坏 YAML 结构，统一压成空格。 */
+  /** YAML Front Matter。值内换行会破坏 YAML 结构，统一压成空格。
+   *  反斜杠必须最先转义——标题以 \ 结尾时会吃掉闭合引号，front matter 直接损坏。 */
   buildFrontMatter(ir, opts) {
-    const esc = (s) => String(s).replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ').trim();
+    const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ').trim();
     const lines = ['---'];
     lines.push(`title: "${esc(ir.title)}"`);
     lines.push(`source: "${esc(ir.url)}"`);
@@ -363,20 +364,32 @@ var InkMarkdown = window.InkMarkdown || {
     const footnotes = [];
     const orphans = [];
     const highlight = !opts || opts.highlightAnchors !== false;
+    // 编号避让：原文可能自带 [^n] 脚注（技术文章常见），
+    // 从其最大编号之后接着编，绝不与正文既有脚注冲突
     let counter = 0;
+    for (const m of markdown.matchAll(/\[\^(\d+)\]/g)) {
+      counter = Math.max(counter, Number(m[1]));
+    }
 
     for (const ann of inlineAnnotations) {
-      const anchor = (ann.anchorText || '').trim();
+      // 锚点与正文做同款不可见字符归一，否则含 nbsp/零宽字符的划线必然失配
+      const anchor = (ann.anchorText || '')
+        .replace(/[\u200b\u200c\u200d\u200e\u200f\ufeff]/g, '')
+        .replace(/\u00a0/g, ' ')
+        .trim();
       let placed = false;
       if (anchor && anchor.length >= 2) {
-        // 只在正文行中搜索，跳过代码块
-        const idx = InkMarkdown._indexOutsideCode(markdown, anchor);
-        if (idx !== -1) {
+        // 只在正文行中搜索，跳过代码块；含转义/跨空白的原文走模糊匹配
+        const hit = InkMarkdown._findAnchor(markdown, anchor);
+        if (hit) {
           counter += 1;
-          const woven = highlight
-            ? `==${anchor}==[^${counter}]`
-            : `${anchor}[^${counter}]`;
-          markdown = markdown.slice(0, idx) + woven + markdown.slice(idx + anchor.length);
+          // 用命中的 md 原片段做展示文本（保留 Turndown 转义，渲染不变形）；
+          // 跨行命中不加 == 高亮——高亮语法不能跨块
+          const shown = markdown.slice(hit.index, hit.index + hit.length);
+          const woven = highlight && !shown.includes('\n')
+            ? `==${shown}==[^${counter}]`
+            : `${shown}[^${counter}]`;
+          markdown = markdown.slice(0, hit.index) + woven + markdown.slice(hit.index + hit.length);
           const noteBody = InkMarkdown._formatAnnotationBody(ann);
           footnotes.push(`[^${counter}]: ${noteBody}`);
           placed = true;
@@ -432,18 +445,61 @@ var InkMarkdown = window.InkMarkdown || {
     return out.join('\n').trim();
   },
 
-  _indexOutsideCode(markdown, needle) {
-    // 粗粒度：按 fenced code 分段，只在非代码段查找
-    const parts = markdown.split(/(```[\s\S]*?```)/);
-    let offset = 0;
-    for (const part of parts) {
-      if (!part.startsWith('```')) {
-        const i = part.indexOf(needle);
-        if (i !== -1) return offset + i;
+  /**
+   * 把 markdown 切成 fenced code 之外的文本段 [{ offset, text }]。
+   * 线性扫描围栏状态而非按 ``` 成对 split——奇数个围栏（未闭合代码块）
+   * 时成对切分会把末段代码误判为正文。段内保留原始换行，跨行锚点可匹配。
+   */
+  _textSegments(markdown) {
+    const segs = [];
+    let fence = null;
+    let pos = 0;
+    let cur = null; // 当前文本段 { offset, end }
+    for (const line of markdown.split('\n')) {
+      const m = line.match(this._fenceRe);
+      if (fence) {
+        if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+        cur = null;
+      } else if (m) {
+        fence = m[1];
+        cur = null;
+      } else {
+        if (!cur) { cur = { offset: pos, end: pos }; segs.push(cur); }
+        cur.end = pos + line.length;
       }
-      offset += part.length;
+      pos += line.length + 1; // 含换行符
+    }
+    return segs.map(s => ({ offset: s.offset, text: markdown.slice(s.offset, s.end) }));
+  },
+
+  _indexOutsideCode(markdown, needle) {
+    for (const seg of this._textSegments(markdown)) {
+      const i = seg.text.indexOf(needle);
+      if (i !== -1) return seg.offset + i;
     }
     return -1;
+  },
+
+  /**
+   * 在非代码区定位锚点原文，返回 { index, length } 或 null。
+   * 快路径：原文精确出现。慢路径「转义感知」：Turndown 会把 * _ [ ] 等
+   * 转义成 \*，锚点里的空白在 md 里可能变成换行/多空格——含特殊字符的
+   * 划线原文此前必然失配降级附录，这是锚定命中率的主要流失点。
+   */
+  _findAnchor(markdown, anchor) {
+    const exact = this._indexOutsideCode(markdown, anchor);
+    if (exact !== -1) return { index: exact, length: anchor.length };
+
+    const words = anchor.split(/\s+/).filter(Boolean);
+    if (!words.length) return null;
+    const re = new RegExp(words.map(w =>
+      w.split('').map(ch => '\\\\?' + ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('')
+    ).join('\\s+'));
+    for (const seg of this._textSegments(markdown)) {
+      const m = seg.text.match(re);
+      if (m) return { index: seg.offset + m.index, length: m[0].length };
+    }
+    return null;
   },
 
   /** 脚注体：首行评论，回复逐行缩进（4 空格续行是多行脚注语法，Obsidian/Typora/GFM 通用）。
