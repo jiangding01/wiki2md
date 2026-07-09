@@ -11,6 +11,7 @@ const $ = (id) => document.getElementById(id);
 
 let tabs = [];
 let filenameTemplate = '{title}';
+const finalizedTabs = new Set(); // 本轮已出结果（✓/✗）的 tab，见进度监听
 
 document.addEventListener('DOMContentLoaded', async () => {
   // 图片本地化开关默认跟随全局图片策略（鉴权站点用户通常已设为 zip）
@@ -18,9 +19,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   filenameTemplate = settings.filenameTemplate || '{title}';
   $('opt-localize').checked = settings.imageStrategy === 'zip';
 
-  // 各页面的抓图进度实时写到对应行的状态位
+  // 各页面的抓图进度实时写到对应行的状态位。
+  // 进度广播与导出响应走不同投递通道、顺序无保证——已定稿（✓/✗）的行
+  // 不再接受迟到的进度覆盖，否则完成态会被旧进度文案冲掉
   chrome.runtime.onMessage.addListener((msg, sender) => {
     if (!msg || msg.type !== 'INK_PROGRESS' || !sender || !sender.tab) return;
+    if (finalizedTabs.has(sender.tab.id)) return;
     const i = tabs.findIndex(t => t.id === sender.tab.id);
     if (i !== -1) setState(i, msg.text, 'busy');
   });
@@ -124,12 +128,16 @@ async function exportSelected() {
   const localize = $('opt-localize').checked;
   btn.disabled = true;
   $('opt-localize').disabled = true;
+  finalizedTabs.clear();
+  // 模板即时重读：批量页可能开着很久，期间用户在设置页改过文件名模板
+  filenameTemplate = (await InkSettings.merged()).filenameTemplate || '{title}';
 
   const zip = new JSZip();
   const usedNames = new Set();
   let okCount = 0;
   let imageCount = 0;
 
+  try {
   for (let k = 0; k < picked.length; k++) {
     const i = picked[k];
     const tab = tabs[i];
@@ -162,22 +170,22 @@ async function exportSelected() {
       if (!res || !res.ok) throw new Error((res && res.error) || '提取失败');
 
       zip.file(`${unique}.md`, res.markdown);
-      for (const img of res.images || []) {
+      const images = res.images || [];
+      for (const img of images) {
         zip.file(img.path, img.base64, { base64: true });
       }
-      imageCount += (res.images || []).length;
+      imageCount += images.length;
 
       okCount += 1;
-      if (res.oversize) {
-        setState(i, '✓ 图片过大未打包（保留远程链接）', 'ok');
-      } else if (res.imageFailed) {
-        setState(i, `✓ ${res.imageFailed} 张图片失败（保留远程链接）`, 'ok');
-      } else {
-        setState(i, localize && res.images.length ? `✓ ${res.images.length} 图` : '✓', 'ok');
-      }
+      const label = res.oversize ? '✓ 图片过大未打包（保留远程链接）'
+        : res.imageFailed ? `✓ ${res.imageFailed} 张图片失败（保留远程链接）`
+        : (localize && images.length ? `✓ ${images.length} 图` : '✓');
+      setState(i, label, 'ok');
     } catch (e) {
       console.warn('[inkmark] batch item failed:', tab.url, e);
       setState(i, '✗ ' + shortErr(e.message), 'err');
+    } finally {
+      finalizedTabs.add(tab.id); // 该行已定稿，迟到的进度广播不再覆盖
     }
   }
 
@@ -194,8 +202,15 @@ async function exportSelected() {
     `完成：成功 ${okCount} 个` +
     (imageCount ? `、打包图片 ${imageCount} 张` : '') +
     (okCount < picked.length ? `，失败 ${picked.length - okCount} 个` : '');
-  btn.disabled = false;
-  $('opt-localize').disabled = false;
+  } catch (e) {
+    // 打包/下载阶段的异常（如超大 ZIP 内存不足）：明示失败，
+    // 控件恢复交给 finally——此前这里无保护，按钮会被永久禁用
+    console.warn('[inkmark] batch export failed:', e);
+    $('batch-status').textContent = '导出失败：' + shortErr(e.message);
+  } finally {
+    btn.disabled = false;
+    $('opt-localize').disabled = false;
+  }
 }
 
 function shortErr(msg) {

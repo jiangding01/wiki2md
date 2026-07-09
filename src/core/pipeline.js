@@ -164,27 +164,25 @@
         (done, total) => progress(`抓取图片 ${done}/${total}…`),
         settings.assetDir || 'assets'
       );
-      // chrome message 有大小上限（且 base64 再膨胀 1/3）：
-      // 图片总量超限的页面整页降级为远程链接，绝不让一页撑爆整批
-      let totalBytes = 0;
-      for (const blob of localized.files.values()) totalBytes += blob.size;
-      const oversize = totalBytes > 40 * 1024 * 1024;
-      const images = [];
-      if (!oversize) {
-        for (const [path, blob] of localized.files) {
-          images.push({ path, base64: await InkExporter.blobToBase64(blob) });
-        }
-      }
       if (settings.keepHistory) {
         // 历史记录存未本地化的 markdown——脱离 ZIP 的 assets 相对路径没有意义
         await InkExporter.recordHistory(ir, markdown, filename, 'batch');
       }
+      let totalBytes = 0;
+      for (const blob of localized.files.values()) totalBytes += blob.size;
+      if (totalBytes > MESSAGE_IMAGE_BUDGET) {
+        // 超预算的页面整页降级为远程链接，绝不让一页撑爆整批消息通道
+        return { ok: true, markdown, filename, title: ir.title, images: [], imageFailed: 0, oversize: true };
+      }
+      // base64 转码是纯本地异步操作，并行把 N 张图压成近似单张耗时
+      const images = await Promise.all(Array.from(localized.files, async ([path, blob]) =>
+        ({ path, base64: await InkExporter.blobToBase64(blob) })));
       return {
         ok: true,
-        markdown: oversize ? markdown : localized.markdown,
+        markdown: localized.markdown,
         filename, title: ir.title, images,
-        imageFailed: oversize ? 0 : localized.failed.length,
-        oversize,
+        imageFailed: localized.failed.length,
+        oversize: false,
       };
     }
     throw new Error('未知导出动作: ' + action);
@@ -197,6 +195,10 @@
    * 「导出报告.md」，绝不静默丢失。
    */
   const TREE_MAX_PAGES = 300;
+
+  /** 批量导出单页图片总量预算（原始字节）。chrome 扩展消息上限 64MB，
+   *  base64 膨胀 4/3：32MB 原始 ≈ 43MB 编码后，给 markdown 与序列化留足余量。 */
+  const MESSAGE_IMAGE_BUDGET = 32 * 1024 * 1024;
 
   async function handleExportTree(options) {
     const settings = await loadSettings(options);
