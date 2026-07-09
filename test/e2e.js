@@ -437,7 +437,7 @@ async function runPipeline(page, fixture, options) {
       '子页面图片进「assets/<页面名>/」分组目录（每层仅一个 assets）', tree.files.join(', '));
     assert(tree.bContent.includes('](assets/孙页面B/img-001.png)'),
       'md 内图片改为相对引用，解压即可离线查看', tree.bContent);
-    assert(!tree.bContent.includes('💬'), '默认关闭时子页不含评论区');
+    assert(!tree.bContent.includes('💬'), '关闭「导出评论」时子页不含评论区');
     assert(tree.resC && tree.resC.ok &&
            tree.bWithComments.includes('## 💬 评论') && tree.bWithComments.includes('树评论内容') &&
            tree.bWithComments.includes('树评人'),
@@ -850,6 +850,20 @@ async function runPipeline(page, fixture, options) {
       InkIR.absolutizeUrls(div, 'https://x.com/');
       out.href = div.querySelector('a').getAttribute('href');
       out.src = div.querySelector('img').getAttribute('src');
+      // 媒体占位（iframe 不经 absolutizeUrls）：转义在转换规则里补齐
+      const td = InkMarkdown.createTurndown({});
+      out.media = td.turndown('<iframe src="https://x.com/embed(v2)" title="演示"></iframe>');
+      // 字面括号解码重试：%28 形态被服务端拒绝时按字面括号再抓一次
+      const calls = [];
+      const origFetch = window.fetch;
+      window.fetch = (u) => {
+        calls.push(String(u));
+        if (String(u).includes('%28')) return Promise.resolve({ ok: false, status: 403 });
+        return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['x'], { type: 'image/png' })) });
+      };
+      const loc2 = await InkExporter.localizeImages('![a](https://cdn.x.com/p%28n%29.png)', null, 'assets/r');
+      window.fetch = origFetch;
+      out.retry = { files: loc2.files.size, calls };
       return out;
     });
     await page3.close();
@@ -861,6 +875,11 @@ async function runPipeline(page, fixture, options) {
       'localized 动作契约完整（file:// 图不在收集范围，原样保留）', JSON.stringify(r.action));
     assert(r.href === 'https://x.com/a%281%29.html', 'a href 括号转义为 %28/%29', r.href);
     assert(r.src === 'https://x.com/i%282%29.png', 'img src 括号转义为 %28/%29', r.src);
+    assert(r.media.includes('(https://x.com/embed%28v2%29)'),
+      '媒体占位（iframe）URL 同样括号转义——不经 absolutizeUrls 的产出路径补齐', r.media);
+    assert(r.retry.files === 1 && r.retry.calls.length === 2 &&
+           r.retry.calls[1].includes('p(n).png'),
+      '%28 形态被拒后按字面括号重试抓取成功', JSON.stringify(r.retry.calls));
   }
 
   await browser.close();
