@@ -137,7 +137,7 @@ var InkFeishuDocx = window.InkFeishuDocx || {
     if (extraParams) {
       for (const [k, v] of Object.entries(extraParams)) u.searchParams.set(k, v);
     }
-    const res = await fetch(u.href, { credentials: 'include' });
+    const res = await InkExporter.fetchWithTimeout(u.href, { credentials: 'include' });
     if (!res.ok) throw new Error(`client_vars HTTP ${res.status}`);
     const body = await res.json();
     if (!body || body.code !== 0 || !body.data || !body.data.block_map) {
@@ -168,7 +168,7 @@ var InkFeishuDocx = window.InkFeishuDocx || {
       const u = new URL('/space/api/wiki/v2/tree/get_path/', location.origin);
       u.searchParams.set('wiki_token', m[1]);
       u.searchParams.set('with_space', 'true');
-      const res = await fetch(u.href, { credentials: 'include' });
+      const res = await InkExporter.fetchWithTimeout(u.href, { credentials: 'include' });
       if (!res.ok) return null;
       const spaceId = this._findKey(await res.json(), 'space_id');
       if (!spaceId) return null;
@@ -246,7 +246,7 @@ var InkFeishuDocx = window.InkFeishuDocx || {
     let lastErr = null;
     for (const base of this._apiBases()) {
       try {
-        const res = await fetch(base + '/space/api/comment/batch', {
+        const res = await InkExporter.fetchWithTimeout(base + '/space/api/comment/batch', {
           method: 'POST', credentials: 'include', headers, body,
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);

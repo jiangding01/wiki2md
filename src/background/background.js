@@ -42,14 +42,10 @@ async function injectPipeline(tabId) {
   });
 }
 
-// 设置的完整默认值与合并逻辑在 pipeline.js（页面侧读 storage），
-// options 发空对象即可。这里只读一项：imageStrategy——
-// 右键/快捷键导出的动作（download vs zip）由调用方决定，
-// 必须尊重用户设置，否则鉴权站点上无声导出一份全裂图的 md。
-async function getSettings() {
-  return {};
-}
-
+// 设置的完整默认值与合并逻辑在页面侧（pipeline 读 storage），消息里发空
+// options 即可。这里只读一项：imageStrategy——右键/快捷键导出的动作
+// （download vs zip）由调用方决定，必须尊重用户设置，
+// 否则鉴权站点上会无声导出一份全裂图的 md。
 async function getExportAction() {
   const stored = await InkSettings.read();
   return stored.imageStrategy === 'zip' ? 'zip' : 'download';
@@ -85,12 +81,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab || !tab.id) return;
   try {
     await injectPipeline(tab.id);
-    const settings = await getSettings();
     let res;
     if (info.menuItemId === 'ink-export-selection') {
-      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT_SELECTION', options: settings });
+      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT_SELECTION', options: {} });
     } else {
-      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: await getExportAction(), options: settings });
+      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: await getExportAction(), options: {} });
     }
     await flashBadge(tab.id, !!(res && res.ok));
   } catch (e) {
@@ -107,8 +102,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (!tab || !tab.id) return;
   try {
     await injectPipeline(tab.id);
-    const settings = await getSettings();
-    const res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: await getExportAction(), options: settings });
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: await getExportAction(), options: {} });
     await flashBadge(tab.id, !!(res && res.ok));
   } catch (e) {
     console.warn('[inkmark] shortcut export failed:', e);

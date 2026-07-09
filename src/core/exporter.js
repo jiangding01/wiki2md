@@ -50,6 +50,27 @@ var InkExporter = window.InkExporter || {
   },
 
   /**
+   * 带超时的 fetch（唯一实现，Confluence REST 与飞书数据接口共用）：
+   * 挂起的接口请求会让分析/导出永远停在进度态，用户只能关页面——
+   * 图片抓取早有 20s 超时，接口调用同样必须有底线。
+   */
+  async fetchWithTimeout(url, options, timeoutMs) {
+    const ms = timeoutMs || 30_000;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, Object.assign({}, options, { signal: ctrl.signal }));
+    } catch (e) {
+      // AbortError 的原始文案不可读，翻译成能行动的话（会进 warnings 展示）
+      throw (e && e.name === 'AbortError')
+        ? new Error(`请求超时（${Math.round(ms / 1000)}s）`)
+        : e;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
+  /**
    * 简单并发池（唯一实现，图片抓取与页面树导出共用）：
    * 结果与输入顺序一致——zip 目录顺序、图片编号的确定性都依赖它。
    * fn 抛出的异常原样向上传播，需要「单项失败不拖垮全局」的调用方自行 try/catch。

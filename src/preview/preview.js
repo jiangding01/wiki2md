@@ -11,8 +11,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.body.dataset.view = 'split';
 
   if (IS_EXTENSION) {
+    // storage.local 只是 popup → 预览页的交接通道：读到后立刻转存本标签页的
+    // sessionStorage（刷新页面内容不丢）并从 local 删除——否则上次预览的
+    // 全文会一直躺在本机存储里（隐私考量，也符合 PRIVACY.md 的口径）
     const { inkmarkPreview } = await chrome.storage.local.get('inkmarkPreview');
-    if (inkmarkPreview && inkmarkPreview.markdown) current = inkmarkPreview;
+    if (inkmarkPreview && inkmarkPreview.markdown) {
+      current = inkmarkPreview;
+      try {
+        sessionStorage.setItem('inkmarkPreview', JSON.stringify(inkmarkPreview));
+        chrome.storage.local.remove('inkmarkPreview');
+      } catch (e) { /* 超大文档超出 sessionStorage 配额：保留 local 以免刷新丢内容 */ }
+    } else {
+      try {
+        const stash = sessionStorage.getItem('inkmarkPreview');
+        if (stash) current = JSON.parse(stash);
+      } catch (e) { /* 解析失败按无内容处理 */ }
+    }
   } else {
     current = demoData(); // 独立打开时的设计稿数据
   }

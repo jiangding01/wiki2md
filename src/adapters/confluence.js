@@ -242,7 +242,8 @@ var ConfluenceAdapter = window.ConfluenceAdapter || {
   /* ---------- 页面树批量导出（REST API，同源自动携带登录态） ---------- */
 
   async _apiGet(url) {
-    const res = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+    const res = await InkExporter.fetchWithTimeout(url,
+      { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   },
