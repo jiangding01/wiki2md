@@ -49,6 +49,18 @@ var InkExporter = window.InkExporter || {
     this.downloadBlob(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), filename);
   },
 
+  /** Blob → base64（不含 data: 前缀）。批量导出经消息通道回传图片用——
+   *  chrome message 只认 JSON 可序列化值，Blob 过不去。
+   *  FileReader 整块读取，避免大 ArrayBuffer 手拼 btoa 的栈溢出。 */
+  blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+      fr.onerror = () => reject(fr.error || new Error('blob 读取失败'));
+      fr.readAsDataURL(blob);
+    });
+  },
+
   /**
    * 带超时的 JSON 请求（唯一实现，Confluence REST 与飞书数据接口共用）：
    * 挂起的接口请求会让分析/导出永远停在进度态，用户只能关页面——

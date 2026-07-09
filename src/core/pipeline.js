@@ -156,6 +156,37 @@
       if (settings.keepHistory) await InkExporter.recordHistory(ir, markdown, filename, 'zip');
       return { ok: true, filename: filename.replace(/\.md$/, '.zip'), ...result };
     }
+    if (action === 'localized') {
+      // 批量导出用：图片抓取必须发生在本页上下文（登录态只在页面里），
+      // 抓好的图以 base64 随消息带回，由批量页统一写 ZIP。
+      const localized = await InkExporter.localizeImages(
+        markdown,
+        (done, total) => progress(`抓取图片 ${done}/${total}…`),
+        settings.assetDir || 'assets'
+      );
+      // chrome message 有大小上限（且 base64 再膨胀 1/3）：
+      // 图片总量超限的页面整页降级为远程链接，绝不让一页撑爆整批
+      let totalBytes = 0;
+      for (const blob of localized.files.values()) totalBytes += blob.size;
+      const oversize = totalBytes > 40 * 1024 * 1024;
+      const images = [];
+      if (!oversize) {
+        for (const [path, blob] of localized.files) {
+          images.push({ path, base64: await InkExporter.blobToBase64(blob) });
+        }
+      }
+      if (settings.keepHistory) {
+        // 历史记录存未本地化的 markdown——脱离 ZIP 的 assets 相对路径没有意义
+        await InkExporter.recordHistory(ir, markdown, filename, 'batch');
+      }
+      return {
+        ok: true,
+        markdown: oversize ? markdown : localized.markdown,
+        filename, title: ir.title, images,
+        imageFailed: oversize ? 0 : localized.failed.length,
+        oversize,
+      };
+    }
     throw new Error('未知导出动作: ' + action);
   }
 
