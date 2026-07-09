@@ -81,13 +81,19 @@ var InkIR = window.InkIR || {
     });
   },
 
-  /** 把所有资源链接绝对化（游离节点里的相对路径会丢上下文）。
-   *  顺带把 URL 里的字面括号转 %28/%29（百分号编码语义等价）：
+  /** URL 字面括号 → %28/%29（百分号编码语义等价）：
    *  md 内联链接 `](url)` 里未转义的 ) 会提前闭合链接，
-   *  图片本地化的收集正则也会在此截断——从源头消灭这类歧义。 */
+   *  图片本地化的收集正则也会在此截断。
+   *  所有产出 URL 的路径（absolutizeUrls / markdown 媒体占位规则）共用本实现。 */
+  escapeUrlParens(u) {
+    return String(u).replace(/\(/g, '%28').replace(/\)/g, '%29');
+  },
+
+  /** 把所有资源链接绝对化（游离节点里的相对路径会丢上下文），
+   *  顺带做括号转义（见 escapeUrlParens）。 */
   absolutizeUrls(root, baseUrl) {
     const base = baseUrl || location.href;
-    const escapeParens = (u) => u.replace(/\(/g, '%28').replace(/\)/g, '%29');
+    const escapeParens = (u) => this.escapeUrlParens(u);
     root.querySelectorAll('img[src]').forEach((img) => {
       try { img.setAttribute('src', escapeParens(new URL(img.getAttribute('src'), base).href)); } catch (e) { /* 保留原值 */ }
     });

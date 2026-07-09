@@ -133,7 +133,14 @@ var InkExporter = window.InkExporter || {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 20_000);
       try {
-        const res = await fetch(url, { credentials: 'include', signal: ctrl.signal });
+        let res = await fetch(url, { credentials: 'include', signal: ctrl.signal });
+        // IR 层把 URL 字面括号统一转成了 %28/%29（md 正确性需要）。
+        // 极少数按「字面字节」签名/路由的服务端（预签名 URL 等）不认编码形态：
+        // 失败时解码回字面括号重试一次，两个世界都不裂图。
+        if (!res.ok && /%28|%29/.test(url)) {
+          res = await fetch(url.replace(/%28/g, '(').replace(/%29/g, ')'),
+            { credentials: 'include', signal: ctrl.signal });
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         const ext = this._extFromType(blob.type) || this._extFromUrl(url) || 'png';
