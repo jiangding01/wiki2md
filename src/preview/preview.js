@@ -7,6 +7,10 @@ const IS_EXTENSION = typeof chrome !== 'undefined' && !!(chrome.storage && chrom
 
 let current = { markdown: '', title: '预览', filename: 'untitled.md' };
 
+// 双栏同步滚动的「源码行号 ↔ 渲染块」映射状态，renderMarkdown() 每次重渲染后重建。
+// valid=false 时（映射算法判定不可信）scrollLock 逻辑会整体回退到比例同步。
+let syncState = { blocks: null, elements: [], valid: false };
+
 document.addEventListener('DOMContentLoaded', async () => {
   document.body.dataset.view = 'split';
 
@@ -62,21 +66,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => { btn.textContent = '复制 Markdown'; }, 1500);
   });
 
-  // 对照视图双栏同步滚动：按滚动比例双向映射（renderd 侧图片/表格与源码行高
-  // 不是线性对应，比例同步能做到「定位区域几乎一致」）。lock 防止回环抖动。
+  // 对照视图双栏同步滚动：优先用 InkPreviewSync 建立的「源码行号 ↔ 渲染块」映射
+  // 做锚点级对齐（对齐块顶部，块内按比例线性插值避免跳变）；映射不可用时（空
+  // 文档、顶层块数与实际 DOM 节点数对不上等，见 renderMarkdown 里的判定）整体
+  // 回退到旧版按滚动条高度比例双向换算。scrollLock + rAF 防止两侧 scroll
+  // 事件互相触发形成回环抖动。
   const paneRendered = document.querySelector('.pane-rendered');
   const sourcePane = source; // textarea 自身滚动
   let scrollLock = false;
-  const syncScroll = (from, to) => {
-    if (scrollLock) return;
-    scrollLock = true;
+
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+  const ratioSync = (from, to) => {
     const fromMax = Math.max(1, from.scrollHeight - from.clientHeight);
     const toMax = Math.max(0, to.scrollHeight - to.clientHeight);
     to.scrollTop = (from.scrollTop / fromMax) * toMax;
-    requestAnimationFrame(() => { scrollLock = false; });
   };
-  paneRendered.addEventListener('scroll', () => syncScroll(paneRendered, sourcePane), { passive: true });
-  sourcePane.addEventListener('scroll', () => syncScroll(sourcePane, paneRendered), { passive: true });
+
+  // textarea 是 white-space: pre-wrap，超长行会自动折成多个视觉行，
+  // 「scrollTop / 行高」算出来的是「视觉行号」的近似值而非严格的逻辑行号——
+  // 正常文档（短行居多）里两者基本重合；单个超长段落内部可能有局部漂移，
+  // 但块边界一到、下一次滚动事件就会用新的 offsetTop 重新对齐，不会累积。
+  const sourceLineHeight = () => {
+    const lh = parseFloat(getComputedStyle(sourcePane).lineHeight);
+    return Number.isFinite(lh) && lh > 0 ? lh : 18;
+  };
+
+  const syncFromSource = () => {
+    if (!syncState.valid) { ratioSync(sourcePane, paneRendered); return; }
+    const line = 1 + sourcePane.scrollTop / sourceLineHeight();
+    const loc = InkPreviewSync.locate(syncState.blocks, line);
+    const el = loc && syncState.elements[loc.blockIndex];
+    if (!el) { ratioSync(sourcePane, paneRendered); return; }
+    const target = el.offsetTop + loc.fraction * el.offsetHeight;
+    paneRendered.scrollTop = clamp(target, 0, Math.max(0, paneRendered.scrollHeight - paneRendered.clientHeight));
+  };
+
+  const syncFromRendered = () => {
+    if (!syncState.valid) { ratioSync(paneRendered, sourcePane); return; }
+    const top = paneRendered.scrollTop;
+    const elements = syncState.elements;
+    let idx = 0;
+    for (let i = 0; i < elements.length; i++) {
+      if (elements[i].offsetTop <= top + 1) idx = i; else break;
+    }
+    const el = elements[idx];
+    const fraction = el.offsetHeight > 0 ? clamp((top - el.offsetTop) / el.offsetHeight, 0, 1) : 0;
+    const line = InkPreviewSync.unlocate(syncState.blocks, idx, fraction);
+    const target = (line - 1) * sourceLineHeight();
+    sourcePane.scrollTop = clamp(target, 0, Math.max(0, sourcePane.scrollHeight - sourcePane.clientHeight));
+  };
+
+  paneRendered.addEventListener('scroll', () => {
+    if (scrollLock) return;
+    scrollLock = true;
+    syncFromRendered();
+    requestAnimationFrame(() => { scrollLock = false; });
+  }, { passive: true });
+  sourcePane.addEventListener('scroll', () => {
+    if (scrollLock) return;
+    scrollLock = true;
+    syncFromSource();
+    requestAnimationFrame(() => { scrollLock = false; });
+  }, { passive: true });
 
   document.getElementById('btn-download').addEventListener('click', () => {
     InkUI.downloadBlob(
@@ -111,6 +163,17 @@ function renderMarkdown() {
   const { frontMatter, body } = splitFrontMatter(current.markdown);
   const rendered = document.getElementById('rendered');
   rendered.innerHTML = sanitizeHtml(marked.parse(body, { breaks: false, gfm: true }));
+
+  // 重建同步滚动映射：只有当 marked token 数与本次实际渲染出的顶层 DOM 节点数
+  // 严格一一对应时才可信（原始 HTML 块可能被 sanitizeHtml 整体删掉，或注释类
+  // 节点压根不产出 Element，都会导致数量对不上）——对不上就整体判定不可用，
+  // 交给 syncFromSource/syncFromRendered 回退比例同步，不做半吊子对齐。
+  const blockEls = Array.from(rendered.children);
+  const map = InkPreviewSync.buildBlockMap(current.markdown, marked.lexer);
+  syncState = (map && map.blocks.length === blockEls.length)
+    ? { blocks: map.blocks, elements: blockEls, valid: true }
+    : { blocks: null, elements: [], valid: false };
+
   if (frontMatter) {
     const meta = document.createElement('div');
     meta.className = 'meta-strip';
