@@ -586,8 +586,8 @@ async function runPipeline(page, fixture, options) {
       'XHTML 文档中图片/表格/代码块分类正确', JSON.stringify(xhtmlStats));
   }
 
-  /* ---------- 用例 18：页面树分卷打包（多卷互补 / 卷号命名 / 报告在末卷） ---------- */
-  console.log('\n[18] 页面树分卷 · 多卷互补 / 卷号命名 / assets 随卷 / 末卷报告');
+  /* ---------- 用例 21：页面树分卷打包（多卷互补 / 卷号命名 / 报告在末卷） ---------- */
+  console.log('\n[21] 页面树分卷 · 多卷互补 / 卷号命名 / assets 随卷 / 末卷报告');
   {
     await page.goto('file://' + path.join(ROOT, 'test/fixtures/confluence-page.html'));
     for (const f of CONTENT_FILES) {
@@ -661,8 +661,8 @@ async function runPipeline(page, fixture, options) {
     assert(vol.res.failed === 0, '全链路无失败项', JSON.stringify(vol.res));
   }
 
-  /* ---------- 用例 19：页面树断点续传（预置中断状态 → 跳过已完成页、从游标继续） ---------- */
-  console.log('\n[19] 页面树续传 · 跳过已完成页 / 从卷边界继续 / 完成清态');
+  /* ---------- 用例 22：页面树断点续传（预置中断状态 → 跳过已完成页、从游标继续） ---------- */
+  console.log('\n[22] 页面树续传 · 跳过已完成页 / 从卷边界继续 / 完成清态');
   {
     await page.goto('file://' + path.join(ROOT, 'test/fixtures/confluence-page.html'));
     for (const f of CONTENT_FILES) {
