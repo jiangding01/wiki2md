@@ -189,19 +189,165 @@
   }
 
   /**
-   * Confluence 页面树批量导出：当前页 + 全部子孙页面 → 一个 ZIP（目录镜像层级）。
+   * Confluence 页面树批量导出：当前页 + 全部子孙页面 → ZIP（目录镜像层级）。
    * 全程走同源 REST API，不打开任何标签页。评论跟随「导出评论」开关
    * （每页多一次 API，关掉开关即可换速度）；失败页面写入 ZIP 内的
    * 「导出报告.md」，绝不静默丢失。
+   *
+   * 分卷：一卷填满即打包为独立 ZIP 立刻下载、释放内存后继续遍历，突破
+   * 单 ZIP 的内存/体积上限（整库导出前置）。assets 归属随卷、卷内自洽。
+   * 单卷以内的小树与旧行为完全一致（文件名不带卷号、报告仅在有失败时生成）。
+   *
+   * 断点续传：每卷完成时把「根 id / BFS 队列游标 / 各卷清单 / 失败清单」等
+   * 轻量数据持久化到 chrome.storage.local（IR 含游离 DOM 不可序列化，故只存
+   * id/标题/路径）。中断后可从上次的卷边界继续，跳过已下载的卷、重拉未完成页面。
    */
-  const TREE_MAX_PAGES = 300;
+
+  /** 分卷与总量上限（常量化并暴露给测试覆写，见 window.__inkmark.__treeConfig）。
+   *  volumePages=300：与旧单包上限一致——单卷内产物和旧行为逐字节一致，无回归；
+   *    超过一卷即分卷，突破单 ZIP 的内存/体积限制。
+   *  maxPages=3000：整库导出的安全阀——防止误触极大空间时无限遍历、
+   *    以及续传清单撑爆 chrome.storage 预算（3000 页清单约 0.2MB，远低于配额）。 */
+  const treeConfig = { volumePages: 300, maxPages: 3000 };
+
+  /** 断点续传状态的存储 key（独立于 inkmarkSettings / inkmarkHistory） */
+  const TREE_RESUME_KEY = 'inkmarkTreeResume';
 
   /** 批量导出单页图片总量预算（原始字节）。chrome 扩展消息上限 64MB，
    *  base64 膨胀 4/3：32MB 原始 ≈ 43MB 编码后，给 markdown 与序列化留足余量。 */
   const MESSAGE_IMAGE_BUDGET = 32 * 1024 * 1024;
 
+  async function loadTreeResume() {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return null;
+    try {
+      const got = await chrome.storage.local.get(TREE_RESUME_KEY);
+      return got[TREE_RESUME_KEY] || null;
+    } catch (e) { return null; }
+  }
+  async function saveTreeResume(state) {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+    try {
+      await chrome.storage.local.set({ [TREE_RESUME_KEY]: state });
+    } catch (e) { console.warn('[inkmark] tree resume save failed:', e); } // 续传失败绝不阻塞导出
+  }
+  async function clearTreeResume() {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+    try { await chrome.storage.local.remove(TREE_RESUME_KEY); } catch (e) { /* 忽略 */ }
+  }
+
+  /** popup 侧「继续/重来」询问用的状态探测：当前页 rootId 是否有可续传的未完成导出 */
+  async function handleTreeStatus() {
+    const adapter = InkAdapters.resolve();
+    if (adapter.id !== 'confluence' || !adapter._pageId) return { ok: true, resumable: false };
+    const rootId = adapter._pageId();
+    const st = await loadTreeResume();
+    const resumable = !!(st && rootId && String(st.rootId) === String(rootId));
+    return {
+      ok: true,
+      resumable,
+      volumesDownloaded: resumable ? (st.volumesDownloaded || 0) : 0,
+      pagesDone: resumable ? (st.pagesDone || 0) : 0,
+      rootTitle: resumable ? st.rootTitle : null,
+    };
+  }
+
+  /** 页面树导出报告（仅最后一卷附带）：各卷清单 + 失败项 */
+  function buildTreeReport(ctx, single) {
+    const totalVolumes = ctx.volumeManifest.length;
+    const out = [`# 页面树导出报告`, '',
+      `成功导出 ${ctx.pagesDone} 页${single ? '' : `，共 ${totalVolumes} 卷`}。`, ''];
+    if (!single) {
+      out.push('## 各卷清单', '');
+      for (const v of ctx.volumeManifest) {
+        out.push(`### 卷 ${v.volume}（${v.files.length} 页）`, '');
+        out.push(v.files.map(f => `- ${f}`).join('\n'), '');
+      }
+    }
+    if (ctx.failures.length) {
+      out.push(`## 失败项（${ctx.failures.length}）`, '');
+      out.push(ctx.failures.map(f => `- ${f}`).join('\n'), '');
+    }
+    return out.join('\n');
+  }
+
+  /**
+   * 打包并下载一卷。final=true 为最后一卷（附导出报告、清除续传状态、文件名不带卷号当且仅当全程只有一卷）。
+   * 文件名分配（去重）按卷内自洽——卷边界确定性由遍历顺序保证，故各卷两次导出内容一致。
+   * 每层目录只有一个 assets/，内部按页面名分子目录（配对关系一眼可见，单独移动 md 时带走同名 assets 即可）。
+   */
+  async function packTreeVolume(volumeNodes, ctx, final) {
+    if (!volumeNodes.length) return; // 空卷不打包（收尾的空缓冲由 handleExportTree 单独补发报告）
+    const volumeNumber = ctx.volumesDownloaded + 1;
+    const single = final && ctx.volumesDownloaded === 0; // 全程只有这一卷 → 文件名不带卷号
+    const safe = (s) => InkExporter.sanitizeName(s, 80);
+    progress(single ? '正在转换并打包…' : `正在打包第 ${volumeNumber} 卷…`);
+
+    const zip = new JSZip();
+    const renderOpts = Object.assign({}, ctx.settings); // 评论呈现方式与单页导出一致
+
+    // 第一步（顺序）：卷内分配文件名——去重必须有序，才能保证 zip 目录确定性
+    const used = new Set();
+    const entries = volumeNodes.map((n) => {
+      const dir = n.path.map(safe).join('/');
+      const name = safe(n.title);
+      let full = (dir ? dir + '/' : '') + name + '.md';
+      for (let k = 2; used.has(full); k++) full = (dir ? dir + '/' : '') + `${name}-${k}.md`;
+      used.add(full);
+      const fileBase = full.slice(full.lastIndexOf('/') + 1, -3);
+      return { n, dir, full, fileBase };
+    });
+
+    // 第二步（3 路并发）：md 渲染 + 逐页图片本地化。页面树的使用场景就是
+    // Confluence——图片全部需要登录态，远程链接在本地必然裂图。
+    // 页面级 3 路 × 页内抓图 2 路 = 总并发 6，贴着浏览器同主机连接上限，
+    // 不再触发企业站点的服务端限流。单页失败降级为「保留远程链接」，绝不拖垮整卷。
+    let localizedDone = 0;
+    const localizedList = await InkExporter.mapPool(entries, 3, async (entry) => {
+      let localized;
+      try {
+        const md = InkMarkdown.render(entry.n.ir, renderOpts);
+        localized = await InkExporter.localizeImages(md, null, `assets/${entry.fileBase}`, 2);
+      } catch (e) {
+        localized = { markdown: `> ⚠️ 本页转换失败：${e.message}\n`, files: new Map(), failed: [], error: e };
+      }
+      localizedDone += 1;
+      progress(`${single ? '' : `卷 ${volumeNumber} · `}图片本地化 ${localizedDone}/${entries.length}：${entry.n.title}`);
+      return localized;
+    });
+
+    // 第三步（顺序）：写入 zip 与失败账目
+    entries.forEach((entry, i) => {
+      const localized = localizedList[i];
+      ctx.imageCount += localized.files.size;
+      ctx.imageFailed += localized.failed.length;
+      for (const [assetPath, blob] of localized.files) {
+        zip.file((entry.dir ? entry.dir + '/' : '') + assetPath, blob);
+      }
+      if (localized.error) {
+        ctx.failures.push(`「${entry.n.title}」转换失败：${localized.error.message}`);
+      } else if (localized.failed.length) {
+        ctx.failures.push(`「${entry.n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
+      }
+      zip.file(entry.full, localized.markdown);
+    });
+
+    // 卷清单登记（供最后一卷的导出报告汇总；轻量——仅 md 相对路径）
+    ctx.volumeManifest.push({ volume: volumeNumber, files: entries.map(e => e.full) });
+
+    // 最后一卷附导出报告：多卷必附（含各卷清单），单卷沿用旧行为——仅有失败时才附
+    if (final && (!single || ctx.failures.length)) {
+      zip.file('导出报告.md', buildTreeReport(ctx, single));
+    }
+
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const tpl = single ? '{title}-页面树' : `{title}-页面树-卷${volumeNumber}`;
+    InkExporter.downloadBlob(blob, InkExporter.buildFilename(tpl, ctx.rootRef, 'zip'));
+    ctx.volumesDownloaded = volumeNumber;
+  }
+
   async function handleExportTree(options) {
-    const settings = await loadSettings(options);
+    const opts = options || {};
+    const settings = await loadSettings(opts);
     window.__inkCustomRules = settings.customRules || [];
     const adapter = InkAdapters.resolve();
     if (adapter.id !== 'confluence') {
@@ -209,35 +355,81 @@
     }
     const rootId = adapter._pageId();
     if (!rootId) return { ok: false, error: '未能识别当前页面的 pageId' };
-
     const base = adapter._baseUrl();
-    let rootIR = await getIR(settings);
-    if (settings.title && settings.title.trim()) {
-      // 与单页导出行为一致：popup 里改过的标题作用于根页与 ZIP 文件名（浅拷贝，不污染缓存）
-      rootIR = Object.assign({}, rootIR, { title: settings.title.trim() });
-    }
-    // 文件/目录名净化统一走 InkExporter.sanitizeName（单一实现，规则不漂移）
-    const safe = (s) => InkExporter.sanitizeName(s, 80);
 
-    const nodes = [{ ir: rootIR, path: [] , title: rootIR.title }];
-    const queue = [{ id: rootId, path: [rootIR.title] }];
-    const failures = [];
-    let fetched = 1;
-    let capped = false;
+    // 续传探测：仅当用户在 popup 明确选择「继续」且状态确属同一根页面时才续传
+    const saved = await loadTreeResume();
+    const resuming = !!(opts.resume && saved && String(saved.rootId) === String(rootId));
+
+    // 遍历上下文：ctx 里的字段既驱动打包、也是续传持久化的轻量快照来源
+    const ctx = {
+      rootId,
+      settings,
+      failures: resuming ? (saved.failures || []) : [],
+      volumeManifest: resuming ? (saved.volumeManifest || []) : [],
+      volumesDownloaded: resuming ? (saved.volumesDownloaded || 0) : 0,
+      pagesDone: resuming ? (saved.pagesDone || 0) : 0,
+      imageCount: 0,
+      imageFailed: 0,
+    };
+
+    let queue;
+    let volumeBuffer;
+    let fetched;
+    let capped;
+
+    if (resuming) {
+      // 已下载的卷不再重复打包；只恢复队列游标，从卷边界继续（当前卷缓冲从空开始）
+      ctx.rootTitle = saved.rootTitle;
+      ctx.rootUrl = saved.rootUrl;
+      ctx.rootRef = { title: saved.rootTitle, url: saved.rootUrl };
+      queue = saved.queue || [];
+      volumeBuffer = [];
+      fetched = saved.fetched || ctx.pagesDone;
+      capped = !!saved.capped;
+    } else {
+      await clearTreeResume(); // 换了根页面或用户选「重新开始」：清掉旧状态
+      let rootIR = await getIR(settings);
+      if (settings.title && settings.title.trim()) {
+        // 与单页导出行为一致：popup 里改过的标题作用于根页与 ZIP 文件名（浅拷贝，不污染缓存）
+        rootIR = Object.assign({}, rootIR, { title: settings.title.trim() });
+      }
+      ctx.rootTitle = rootIR.title;
+      ctx.rootUrl = rootIR.url;
+      ctx.rootRef = rootIR;
+      volumeBuffer = [{ ir: rootIR, path: [], title: rootIR.title }];
+      queue = [{ id: rootId, path: [rootIR.title] }];
+      ctx.pagesDone = 1; // 根页计入
+      fetched = 1;
+      capped = false;
+    }
 
     while (queue.length) {
+      // 满卷即打包下载并持久化续传状态——只在卷边界持久化：此刻缓冲已清空、
+      // 队列完整反映全部待办，中断后从此处恢复不会重复或漏页
+      if (volumeBuffer.length >= treeConfig.volumePages) {
+        await packTreeVolume(volumeBuffer, ctx, false);
+        volumeBuffer = [];
+        await saveTreeResume({
+          version: 1, rootId: ctx.rootId, rootTitle: ctx.rootTitle, rootUrl: ctx.rootUrl,
+          queue, volumeManifest: ctx.volumeManifest, failures: ctx.failures,
+          volumesDownloaded: ctx.volumesDownloaded, pagesDone: ctx.pagesDone,
+          fetched, capped, updatedAt: Date.now(),
+        });
+      }
+
       const cur = queue.shift();
       let children = [];
       try {
         children = await adapter.fetchChildren(cur.id);
       } catch (e) {
-        failures.push(`页面 ${cur.id} 的子页面列表拉取失败：${e.message}`);
+        ctx.failures.push(`页面 ${cur.id} 的子页面列表拉取失败：${e.message}`);
         continue;
       }
-      const capacity = TREE_MAX_PAGES - fetched;
+      const capacity = treeConfig.maxPages - fetched;
       if (children.length > capacity) {
-        failures.push(`超出 ${TREE_MAX_PAGES} 页安全上限，「${children[capacity] ? children[capacity].title : ''}」及之后的页面未导出`);
-        children = children.slice(0, capacity);
+        ctx.failures.push(`超出 ${treeConfig.maxPages} 页安全上限，「${children[capacity] ? children[capacity].title : ''}」及之后的页面未导出`);
+        children = children.slice(0, Math.max(0, capacity));
         // 硬停：清空待爬队列，且本批页面只导出、不再入队下钻——
         // 否则队列会被下面的 queue.push 重新填满，触顶后继续打 REST 并重复报「超限」
         capped = true;
@@ -268,86 +460,44 @@
       });
       for (const r of results) {
         if (r.error) {
-          failures.push(`「${r.child.title || r.child.id}」抓取失败：${r.error.message}`);
+          ctx.failures.push(`「${r.child.title || r.child.id}」抓取失败：${r.error.message}`);
           continue;
         }
         const url = `${base}/pages/viewpage.action?pageId=${r.child.id}`;
         const ir = adapter.htmlToIR(r.meta, url);
         ir.annotations = r.annotations;
         if (r.commentError) {
-          failures.push(`「${r.meta.title}」评论拉取失败（${r.commentError.message}），仅导出正文`);
+          ctx.failures.push(`「${r.meta.title}」评论拉取失败（${r.commentError.message}），仅导出正文`);
         } else if (r.commentState.truncated) {
-          failures.push(`「${r.meta.title}」评论超出拉取上限，已截断`);
+          ctx.failures.push(`「${r.meta.title}」评论超出拉取上限，已截断`);
         }
-        nodes.push({ ir, path: cur.path, title: r.meta.title });
+        volumeBuffer.push({ ir, path: cur.path, title: r.meta.title });
+        ctx.pagesDone += 1;
         if (!capped) queue.push({ id: r.child.id, path: cur.path.concat(r.meta.title) });
       }
     }
 
-    progress('正在转换并打包…');
-    const zip = new JSZip();
-    const renderOpts = Object.assign({}, settings); // 评论呈现方式与单页导出一致
-
-    // 第一步（顺序）：分配文件名——去重必须有序，才能保证 zip 目录确定性。
-    // 目录结构：每层目录只有一个 assets/，内部按页面名分子目录——
-    // 目录列表不被「每篇 md 一个长名文件夹」翻倍，配对关系仍一眼可见，
-    // 单独移动某篇 md 时带走 assets/<同名>/ 即可。
-    const used = new Set();
-    const entries = nodes.map((n) => {
-      const dir = n.path.map(safe).join('/');
-      const name = safe(n.title);
-      let full = (dir ? dir + '/' : '') + name + '.md';
-      for (let k = 2; used.has(full); k++) full = (dir ? dir + '/' : '') + `${name}-${k}.md`;
-      used.add(full);
-      const fileBase = full.slice(full.lastIndexOf('/') + 1, -3);
-      return { n, dir, full, fileBase };
-    });
-
-    // 第二步（3 路并发）：md 渲染 + 逐页图片本地化。页面树的使用场景就是
-    // Confluence——图片全部需要登录态，远程链接在本地必然裂图。
-    // 渲染放进池里与图片下载重叠，第一张图不用等全部页面渲染完。
-    // 页面级 3 路 × 页内抓图 2 路 = 总并发 6，贴着浏览器同主机连接上限，
-    // 不再触发企业站点的服务端限流（12 路并发时能成功的图会批量 429）。
-    // 单页失败降级为「该页保留远程链接」，绝不让一页异常拖垮整个导出。
-    let localizedDone = 0;
-    let imageCount = 0;
-    let imageFailed = 0;
-    const localizedList = await InkExporter.mapPool(entries, 3, async (entry) => {
-      let localized;
-      try {
-        const md = InkMarkdown.render(entry.n.ir, renderOpts);
-        localized = await InkExporter.localizeImages(md, null, `assets/${entry.fileBase}`, 2);
-      } catch (e) {
-        localized = { markdown: `> ⚠️ 本页转换失败：${e.message}\n`, files: new Map(), failed: [], error: e };
-      }
-      localizedDone += 1;
-      progress(`图片本地化 ${localizedDone}/${entries.length}：${entry.n.title}`);
-      return localized;
-    });
-
-    // 第三步（顺序）：写入 zip 与失败账目
-    entries.forEach((entry, i) => {
-      const localized = localizedList[i];
-      imageCount += localized.files.size;
-      imageFailed += localized.failed.length;
-      for (const [assetPath, blob] of localized.files) {
-        zip.file((entry.dir ? entry.dir + '/' : '') + assetPath, blob);
-      }
-      if (localized.error) {
-        failures.push(`「${entry.n.title}」转换失败：${localized.error.message}`);
-      } else if (localized.failed.length) {
-        failures.push(`「${entry.n.title}」有 ${localized.failed.length} 张图片抓取失败，已保留远程链接`);
-      }
-      zip.file(entry.full, localized.markdown);
-    });
-    if (failures.length) {
-      zip.file('导出报告.md',
-        `# 页面树导出报告\n\n成功导出 ${nodes.length} 页。以下 ${failures.length} 项失败：\n\n` +
-        failures.map(f => `- ${f}`).join('\n') + '\n');
+    // 收尾：最后一卷（可能不满）打包，附导出报告
+    if (volumeBuffer.length) {
+      await packTreeVolume(volumeBuffer, ctx, true);
+    } else if (ctx.volumesDownloaded > 0) {
+      // 极端边界：内容恰好在卷边界用尽（末尾全是叶子页），单独补发一卷汇总报告，
+      // 不制造带页面的空卷。多卷必附各卷清单，单卷路径不会走到这里。
+      const zip = new JSZip();
+      zip.file('导出报告.md', buildTreeReport(ctx, false));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      InkExporter.downloadBlob(blob, InkExporter.buildFilename('{title}-页面树-导出报告', ctx.rootRef, 'zip'));
     }
-    const blob = await zip.generateAsync({ type: 'blob' });
-    InkExporter.downloadBlob(blob, InkExporter.buildFilename('{title}-页面树', rootIR, 'zip'));
-    return { ok: true, pages: nodes.length, failed: failures.length, images: imageCount, imageFailed };
+    await clearTreeResume(); // 正常完成：清除续传状态
+    return {
+      ok: true,
+      pages: ctx.pagesDone,
+      volumes: ctx.volumesDownloaded,
+      failed: ctx.failures.length,
+      images: ctx.imageCount,
+      imageFailed: ctx.imageFailed,
+      resumed: resuming,
+    };
   }
 
   async function handleExportSelection(options) {
@@ -377,7 +527,11 @@
   }
 
   // 供测试环境直接调用（fixture 页面里没有 chrome.runtime）
-  window.__inkmark = { getIR, handleAnalyze, handleExport, handleExportSelection, handleExportTree, loadSettings };
+  // __treeConfig 暴露分卷/总量上限，测试可临时改小以覆盖分卷与硬停路径
+  window.__inkmark = {
+    getIR, handleAnalyze, handleExport, handleExportSelection,
+    handleExportTree, handleTreeStatus, loadSettings, __treeConfig: treeConfig,
+  };
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -387,6 +541,7 @@
         if (msg.type === 'INK_EXPORT') return await withExportBusy(() => handleExport(msg.action, msg.options));
         if (msg.type === 'INK_EXPORT_SELECTION') return await withExportBusy(() => handleExportSelection(msg.options));
         if (msg.type === 'INK_EXPORT_TREE') return await withExportBusy(() => handleExportTree(msg.options));
+        if (msg.type === 'INK_TREE_STATUS') return await handleTreeStatus();
         return { ok: false, error: '未知消息类型' };
       } catch (e) {
         console.error('[inkmark]', e);

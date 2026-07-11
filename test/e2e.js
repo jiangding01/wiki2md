@@ -535,8 +535,13 @@ async function runPipeline(page, fixture, options) {
     assert(pool.peak <= 3 && pool.peak >= 2, 'mapPool 并发数被限制在 limit 内', String(pool.peak));
 
     const cap = await page.evaluate(async () => {
-      // 根页下挂 350 个子页（每个子页还有孙页）：触顶后必须硬停——
-      // 不再对任何子页调用 child/page，报告只出现一条「超出上限」
+      // 总量安全上限（maxPages）：触顶后必须硬停——不再对任何子页调用 child/page，
+      // 报告只出现一条「超出上限」。用测试覆写把上限改小到 5、卷上限调大（保持单卷），
+      // 直接命中硬停路径而不必构造数千页 mock。
+      const cfg = window.__inkmark.__treeConfig;
+      const savedMax = cfg.maxPages, savedVol = cfg.volumePages;
+      cfg.maxPages = 5;         // 根 + 4 子页触顶
+      cfg.volumePages = 1000;   // 卷上限拉高 → 全程单卷，与旧断言（无卷号）一致
       const json = (obj) => Promise.resolve({ ok: true, json: () => Promise.resolve(obj) });
       let childListCalls = 0;
       window.fetch = (url) => {
@@ -560,13 +565,15 @@ async function runPipeline(page, fixture, options) {
       const zip = await JSZip.loadAsync(captured.blob);
       const report = await (zip.file('导出报告.md') || { async: () => '' }).async('string');
       const mdCount = Object.keys(zip.files).filter(n => n.endsWith('.md') && n !== '导出报告.md').length;
-      return { res, childListCalls, report, mdCount };
+      cfg.maxPages = savedMax; cfg.volumePages = savedVol; // 复原，勿泄漏到其他用例
+      return { res, childListCalls, report, mdCount, filename: captured.filename };
     });
-    assert(cap.res.ok && cap.res.pages === 300, '恰好导出 300 页（根 + 299 子页）', JSON.stringify(cap.res));
+    assert(cap.res.ok && cap.res.pages === 5, '触顶总量上限：恰好导出 5 页（根 + 4 子页）', JSON.stringify(cap.res));
     assert(cap.childListCalls === 1, '触顶后不再发出任何子页面列表请求（硬停）', String(cap.childListCalls));
-    assert(cap.report.split('超出').length === 2 && cap.report.includes('批量子页299'),
+    assert(cap.report.split('超出').length === 2 && cap.report.includes('批量子页4'),
       '「超出上限」报告恰好一条且指向正确截断点', cap.report);
-    assert(cap.mdCount === 300, 'ZIP 内 md 文件数与导出页数一致', String(cap.mdCount));
+    assert(cap.mdCount === 5, 'ZIP 内 md 文件数与导出页数一致', String(cap.mdCount));
+    assert(!cap.filename.includes('卷'), '单卷（卷上限内）文件名不带卷号，无回归', cap.filename);
 
     const xhtmlStats = await page.evaluate(() => {
       // XHTML 文档里 tagName 保持小写——stats 分类不得依赖大写比较
@@ -577,6 +584,170 @@ async function runPipeline(page, fixture, options) {
     });
     assert(xhtmlStats.images === 1 && xhtmlStats.tables === 1 && xhtmlStats.codeBlocks === 1,
       'XHTML 文档中图片/表格/代码块分类正确', JSON.stringify(xhtmlStats));
+  }
+
+  /* ---------- 用例 18：页面树分卷打包（多卷互补 / 卷号命名 / 报告在末卷） ---------- */
+  console.log('\n[18] 页面树分卷 · 多卷互补 / 卷号命名 / assets 随卷 / 末卷报告');
+  {
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/confluence-page.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const vol = await page.evaluate(async () => {
+      // 覆写卷上限为 2：链式树 root→A→B→C→D（各页 1 子），5 页应分 3 卷。
+      const cfg = window.__inkmark.__treeConfig;
+      const savedMax = cfg.maxPages, savedVol = cfg.volumePages;
+      cfg.volumePages = 2; cfg.maxPages = 3000;
+      const json = (obj) => Promise.resolve({ ok: true, json: () => Promise.resolve(obj) });
+      const chain = { '128450': '200', '200': '300', '300': '400', '400': '500', '500': null };
+      const titles = { '200': '卷测子A', '300': '卷测子B', '400': '卷测子C', '500': '卷测子D' };
+      window.fetch = (url) => {
+        url = String(url);
+        const cm = url.match(/\/content\/(\d+)\/child\/page/);
+        if (cm) {
+          const next = chain[cm[1]];
+          return json({ results: next ? [{ id: next, title: titles[next] }] : [] });
+        }
+        const pm = url.match(/\/content\/(\d+)\?expand/);
+        if (pm) {
+          const id = pm[1];
+          // 子B 带一张图片：验证 assets 随所属页面进对应卷
+          const body = id === '300'
+            ? '<p>B 正文</p><p><img src="https://wiki.example.com/download/attachments/300/v.png"></p>'
+            : `<p>${titles[id]} 正文</p>`;
+          return json({ title: titles[id], body: { export_view: { value: body } } });
+        }
+        if (url.includes('v.png')) {
+          return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(['x'], { type: 'image/png' })) });
+        }
+        return Promise.resolve({ ok: false, status: 404 });
+      };
+      const dls = [];
+      InkExporter.downloadBlob = (blob, filename) => dls.push({ blob, filename });
+      const res = await window.__inkmark.handleExportTree({ includeComments: false, frontMatter: false });
+      const zips = [];
+      for (const d of dls) {
+        const z = await JSZip.loadAsync(d.blob);
+        zips.push({
+          filename: d.filename,
+          files: Object.keys(z.files).filter(n => !z.files[n].dir).sort(),
+          report: z.file('导出报告.md') ? await z.file('导出报告.md').async('string') : null,
+        });
+      }
+      cfg.maxPages = savedMax; cfg.volumePages = savedVol;
+      return { res, zips };
+    });
+    assert(vol.res.ok && vol.res.pages === 5 && vol.res.volumes === 3,
+      '5 页按每卷 2 页分为 3 卷', JSON.stringify(vol.res));
+    assert(vol.zips.length === 3, '产出 3 个独立 ZIP（满卷即下载、逐卷释放内存）', String(vol.zips.length));
+    assert(vol.zips.every((z, i) => z.filename.includes(`页面树-卷${i + 1}`) && z.filename.endsWith('.zip')),
+      '各卷文件名带递增卷号', vol.zips.map(z => z.filename).join(', '));
+    // 互补不重叠：全部 md 并集恰为 5 页且无重复
+    const allMd = vol.zips.flatMap(z => z.files.filter(f => f.endsWith('.md') && f !== '导出报告.md'));
+    assert(allMd.length === 5 && new Set(allMd).size === 5,
+      '各卷 md 互补不重叠、并集为全树', allMd.join(', '));
+    assert(vol.zips[0].files.includes('支付网关重构方案.md') &&
+           vol.zips[0].files.includes('支付网关重构方案/卷测子A.md'),
+      '卷1 = 根页 + 子A', vol.zips[0].files.join(', '));
+    assert(vol.zips[2].files.some(f => f.endsWith('卷测子D.md')),
+      '卷3 = 末页 子D', vol.zips[2].files.join(', '));
+    assert(vol.zips[1].files.some(f => f.includes('assets/卷测子B/img-001.png')),
+      '子B 的图片进卷2 的 assets（assets 归属随卷、卷内自洽）', vol.zips[1].files.join(', '));
+    assert(!vol.zips[0].report && !vol.zips[1].report && !!vol.zips[2].report,
+      '导出报告只在最后一卷', vol.zips.map(z => !!z.report).join(','));
+    assert(vol.zips[2].report.includes('各卷清单') && vol.zips[2].report.includes('共 3 卷') &&
+           vol.zips[2].report.includes('支付网关重构方案/卷测子A.md'),
+      '末卷报告含各卷清单（覆盖此前各卷）与卷数', vol.zips[2].report);
+    assert(vol.res.failed === 0, '全链路无失败项', JSON.stringify(vol.res));
+  }
+
+  /* ---------- 用例 19：页面树断点续传（预置中断状态 → 跳过已完成页、从游标继续） ---------- */
+  console.log('\n[19] 页面树续传 · 跳过已完成页 / 从卷边界继续 / 完成清态');
+  {
+    await page.goto('file://' + path.join(ROOT, 'test/fixtures/confluence-page.html'));
+    for (const f of CONTENT_FILES) {
+      await page.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const rs = await page.evaluate(async () => {
+      // e2e 环境无 chrome：注入最小的内存版 chrome.storage.local 供续传读写。
+      const store = {};
+      window.chrome = {
+        storage: {
+          local: {
+            get: (k) => Promise.resolve(typeof k === 'string' ? { [k]: store[k] } : {}),
+            set: (obj) => { Object.assign(store, obj); return Promise.resolve(); },
+            remove: (k) => { delete store[k]; return Promise.resolve(); },
+          },
+        },
+      };
+      // 预置「卷1 已下载」的中断状态：根页 + 子A 已打包，游标停在子A（待拉其子页面）
+      const preset = {
+        version: 1, rootId: '128450', rootTitle: '支付网关重构方案',
+        rootUrl: 'https://wiki.example.com/pages/viewpage.action?pageId=128450',
+        queue: [{ id: '200', path: ['支付网关重构方案'] }],
+        volumeManifest: [{ volume: 1, files: ['支付网关重构方案.md', '支付网关重构方案/卷测子A.md'] }],
+        failures: [], volumesDownloaded: 1, pagesDone: 2, fetched: 2, capped: false,
+        updatedAt: Date.now(),
+      };
+      store.inkmarkTreeResume = preset;
+
+      const cfg = window.__inkmark.__treeConfig;
+      const savedMax = cfg.maxPages, savedVol = cfg.volumePages;
+      cfg.volumePages = 2; cfg.maxPages = 3000;
+
+      // 探测：popup 据此弹「继续/重来」
+      const status = await window.__inkmark.handleTreeStatus();
+
+      const chain = { '200': '300', '300': '400', '400': '500', '500': null };
+      const titles = { '200': '卷测子A', '300': '卷测子B', '400': '卷测子C', '500': '卷测子D' };
+      const fetched = [];
+      const json = (obj) => Promise.resolve({ ok: true, json: () => Promise.resolve(obj) });
+      window.fetch = (url) => {
+        url = String(url);
+        fetched.push(url);
+        const cm = url.match(/\/content\/(\d+)\/child\/page/);
+        if (cm) {
+          const next = chain[cm[1]];
+          return json({ results: next ? [{ id: next, title: titles[next] }] : [] });
+        }
+        const pm = url.match(/\/content\/(\d+)\?expand/);
+        if (pm) return json({ title: titles[pm[1]], body: { export_view: { value: `<p>${titles[pm[1]]} 正文</p>` } } });
+        return Promise.resolve({ ok: false, status: 404 });
+      };
+      const dls = [];
+      InkExporter.downloadBlob = (blob, filename) => dls.push({ blob, filename });
+
+      const res = await window.__inkmark.handleExportTree({ includeComments: false, frontMatter: false, resume: true });
+      const zips = [];
+      for (const d of dls) {
+        const z = await JSZip.loadAsync(d.blob);
+        zips.push({ filename: d.filename, report: z.file('导出报告.md') ? await z.file('导出报告.md').async('string') : null });
+      }
+      cfg.maxPages = savedMax; cfg.volumePages = savedVol;
+      return {
+        status, res, filenames: dls.map(d => d.filename), zips,
+        rootChildCalled: fetched.some(u => /\/content\/128450\/child\/page/.test(u)),
+        pageA_bodyRefetched: fetched.some(u => /\/content\/200\?expand/.test(u)),
+        pageA_childCalled: fetched.some(u => /\/content\/200\/child\/page/.test(u)),
+        pageB_bodyFetched: fetched.some(u => /\/content\/300\?expand/.test(u)),
+        cleared: store.inkmarkTreeResume === undefined,
+      };
+    });
+    assert(rs.status.resumable && rs.status.volumesDownloaded === 1 && rs.status.pagesDone === 2,
+      '状态探测：同根页面识别为可续传（已 1 卷 / 2 页）', JSON.stringify(rs.status));
+    assert(rs.res.ok && rs.res.resumed === true, '本次导出标记为续传', JSON.stringify(rs.res));
+    assert(!rs.rootChildCalled, '根页（已完成）不再重新拉子页面列表', String(rs.rootChildCalled));
+    assert(!rs.pageA_bodyRefetched, '已打包页（子A）正文不重新拉取（跳过已完成页）', String(rs.pageA_bodyRefetched));
+    assert(rs.pageA_childCalled && rs.pageB_bodyFetched,
+      '从游标继续：拉子A 的子页面、抓未完成页（子B）正文', JSON.stringify({ a: rs.pageA_childCalled, b: rs.pageB_bodyFetched }));
+    assert(rs.res.pages === 5 && rs.res.volumes === 3,
+      '续传后总量与不中断一致：共 5 页 3 卷', JSON.stringify(rs.res));
+    assert(rs.filenames.every(f => /页面树-卷[23]/.test(f)) && rs.filenames.length === 2,
+      '续传只补下载卷2、卷3（卷1 不重复）', rs.filenames.join(', '));
+    assert(rs.zips[1] && rs.zips[1].report && rs.zips[1].report.includes('共 3 卷') &&
+           rs.zips[1].report.includes('支付网关重构方案/卷测子A.md'),
+      '末卷报告跨中断汇总：含续传前卷1 的清单', rs.zips[1] && rs.zips[1].report);
+    assert(rs.cleared, '正常完成后清除续传状态', String(rs.cleared));
   }
 
   /* ---------- 用例 17：飞书接口化采集（client_vars mock 全链路） ---------- */

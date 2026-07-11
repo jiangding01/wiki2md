@@ -384,14 +384,28 @@ async function doPreview() {
 
 async function doExportTree() {
   if (state.busy) return;
+
+  // 续传探测：同根页面有未完成导出时，先问用户「继续（从下一卷起）/重新开始」。
+  // confirm 是 popup 里最小的交互——复用现有进度文案机制，不新增 UI 结构。
+  let resume = false;
+  try {
+    const st = await sendToPage({ type: 'INK_TREE_STATUS', options: exportOptions() });
+    if (st && st.ok && st.resumable) {
+      resume = window.confirm(
+        `检测到「${st.rootTitle || '本页面树'}」有未完成的导出（已下载 ${st.volumesDownloaded} 卷、${st.pagesDone} 页）。\n\n` +
+        `点「确定」从第 ${st.volumesDownloaded + 1} 卷继续，点「取消」重新开始。`);
+    }
+  } catch (e) { /* 探测失败按普通导出处理 */ }
+
   state.localAction = true;
   const btn = $('btn-tree');
   setBusy(true);
-  btn.textContent = '🌳 抓取页面树中…';
+  btn.textContent = resume ? '🌳 续传页面树中…' : '🌳 抓取页面树中…';
   try {
-    const res = await sendToPage({ type: 'INK_EXPORT_TREE', options: exportOptions() });
+    const res = await sendToPage({ type: 'INK_EXPORT_TREE', options: Object.assign(exportOptions(), { resume }) });
     if (!res.ok) throw new Error(res.error);
-    status(`已导出 ${res.pages} 页、${res.images || 0} 张图片` +
+    const volPart = res.volumes > 1 ? `、共 ${res.volumes} 卷` : '';
+    status(`已导出 ${res.pages} 页、${res.images || 0} 张图片${volPart}` +
       (res.failed ? `（${res.failed} 项异常，详见 ZIP 内导出报告）` : ''));
   } catch (e) {
     status('页面树导出失败：' + e.message, true);
