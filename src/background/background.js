@@ -26,20 +26,55 @@ const CONTENT_FILES = [
   'src/core/pipeline.js',
 ];
 
+/**
+ * 注入内容脚本到 tab 的所有 frame（顶层 + 子 frame）。
+ * 部分页面正文位于 iframe（邮箱、在线预览器），只注顶层会导出空/残缺。
+ *
+ * 关键约束：
+ * - 已注入的 frame 跳过——重复注入会重放全部脚本（顶层声明重复求值报错 + 白跑）。
+ * - 跨源子 frame 若无注入权限，不会出现在探测结果里，静默降级；绝不阻塞顶层。
+ * - 返回已就绪的 frame 列表 [{ frameId }]，供 popup 定向分析各帧、跨 frame 选优。
+ * @returns {Promise<Array<{frameId:number}>>}
+ */
 async function injectPipeline(tabId) {
-  // 已注入则跳过：重复注入会把所有脚本文件重放一遍——
-  // 顶层声明重复求值（报错噪音）+ 白白重跑，一次探测省掉这两样
+  // 探测各 frame 的注入状态（allFrames）：结果数组里只含扩展有权访问的 frame，
+  // 跨源受限子 frame 自动缺席——这正是我们要的优雅降级。
+  let probes = null;
   try {
-    const [probe] = await chrome.scripting.executeScript({
-      target: { tabId },
+    probes = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
       func: () => window.__INKMARK_LOADED__ === true,
     });
-    if (probe && probe.result) return;
-  } catch (e) { /* 探测失败（页面受限等）时按未注入处理，让下面的注入给出真实报错 */ }
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: CONTENT_FILES,
-  });
+  } catch (e) { /* allFrames 探测整体失败（页面受限等）：走下面的顶层兜底注入 */ }
+
+  // 探测拿不到任何 frame：退回顶层单帧注入（与历史行为完全一致），让注入给出真实报错
+  if (!probes || !probes.length) {
+    await chrome.scripting.executeScript({ target: { tabId }, files: CONTENT_FILES });
+    return [{ frameId: 0 }]; // Chrome 主框架 frameId 恒为 0
+  }
+
+  const ready = probes.filter((p) => p && p.result === true).map((p) => p.frameId);
+  const pending = probes.filter((p) => p && p.result !== true).map((p) => p.frameId);
+
+  if (pending.length) {
+    // 探测能命中的 frame 即可注入文件（同一权限面）；整体失败则逐帧重试，
+    // 个别子 frame 注入失败（跨源竞态等）静默跳过，不连累其它 frame。
+    try {
+      await chrome.scripting.executeScript({ target: { tabId, frameIds: pending }, files: CONTENT_FILES });
+      ready.push(...pending);
+    } catch (e) {
+      for (const frameId of pending) {
+        try {
+          await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: CONTENT_FILES });
+          ready.push(frameId);
+        } catch (e2) { /* 该子 frame 注入失败：放弃它，主流程照常 */ }
+      }
+    }
+  }
+
+  // 顶层优先排序：popup 选优默认以顶层为基准
+  ready.sort((a, b) => a - b);
+  return ready.map((frameId) => ({ frameId }));
 }
 
 // 设置的完整默认值与合并逻辑在页面侧（pipeline 读 storage），消息里发空
@@ -83,7 +118,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     await injectPipeline(tab.id);
     let res;
     if (info.menuItemId === 'ink-export-selection') {
-      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT_SELECTION', options: {} });
+      // 选区可能在子 frame 里——定向发往用户实际右键的那个 frame，
+      // 否则顶层拿不到子 frame 的 selection，导出「没有选中内容」。
+      res = await chrome.tabs.sendMessage(
+        tab.id, { type: 'INK_EXPORT_SELECTION', options: {} },
+        info.frameId != null ? { frameId: info.frameId } : undefined);
     } else {
       res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: await getExportAction(), options: {} });
     }
@@ -115,7 +154,8 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'INK_INJECT' && msg.tabId) {
     injectPipeline(msg.tabId)
-      .then(() => sendResponse({ ok: true }))
+      // frames：已就绪的各 frame（顶层 + 可注入的子 frame），popup 据此选正文帧
+      .then((frames) => sendResponse({ ok: true, frames }))
       .catch(e => sendResponse({ ok: false, error: e.message }));
     return true;
   }

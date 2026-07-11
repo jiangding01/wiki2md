@@ -983,6 +983,93 @@ async function runPipeline(page, fixture, options) {
       JSON.stringify(r.fallback));
   }
 
+  /* ---------- 用例 19：跨 frame 正文选优（评分纯函数） ---------- */
+  console.log('\n[19] 跨 frame 选优 · InkFrameSelect 评分规则');
+  {
+    const pageF = await browser.newPage();
+    await pageF.goto('file://' + path.join(ROOT, 'test/fixtures', 'generic-article.html'));
+    await pageF.addScriptTag({ path: path.join(ROOT, 'src/core/frame-select.js') });
+    const r = await pageF.evaluate(() => {
+      const pick = (frames) => window.InkFrameSelect.pickContentFrame(frames);
+      const top = (extra) => Object.assign({ frameId: 0, isTop: true, ok: true, adapterId: 'generic', badge: 'generic', words: 0 }, extra);
+      const kid = (extra) => Object.assign({ frameId: 1, isTop: false, ok: true, adapterId: 'generic', badge: 'generic', words: 0 }, extra);
+      return {
+        // A: 顶层丰富 → 维持顶层，哪怕子 frame 精配命中
+        topRich: pick([top({ words: 500 }), kid({ adapterId: 'confluence', badge: 'precise', words: 300 })]),
+        // B: 顶层贫瘠 + 子 frame 精配命中 → 切子 frame
+        childPrecise: pick([top({ words: 20 }), kid({ adapterId: 'feishu', badge: 'precise', words: 150 })]),
+        // C: 顶层贫瘠 + 子 frame 字数远超（generic）→ 切子 frame
+        childDominant: pick([top({ words: 30 }), kid({ words: 400 })]),
+        // D: 顶层贫瘠 + 子 frame 不够显著优 → 维持顶层
+        topKept: pick([top({ words: 30 }), kid({ words: 120 })]),
+        // E: 顶层分析失败 + 子 frame 有内容 → 切子 frame（放宽门槛）
+        topFailed: pick([top({ ok: false, words: 0 }), kid({ words: 50 })]),
+        // F: 全部失败/无内容 → 维持顶层
+        allEmpty: pick([top({ ok: false }), kid({ ok: false })]),
+        // G: 单帧 → 维持顶层
+        single: pick([top({ words: 20 })]),
+      };
+    });
+    await pageF.close();
+    assert(r.topRich.isTop && r.topRich.reason === 'top-rich',
+      '顶层丰富时维持顶层（子 frame 再精配也不切）', JSON.stringify(r.topRich));
+    assert(!r.childPrecise.isTop && r.childPrecise.frameId === 1 && r.childPrecise.reason === 'child-precise',
+      '顶层贫瘠 + 子 frame 精配命中 → 切子 frame', JSON.stringify(r.childPrecise));
+    assert(!r.childDominant.isTop && r.childDominant.frameId === 1 && r.childDominant.reason === 'child-dominant',
+      '顶层贫瘠 + 子 frame 字数远超 → 切子 frame', JSON.stringify(r.childDominant));
+    assert(r.topKept.isTop && r.topKept.reason === 'top-kept',
+      '子 frame 不够显著优时维持顶层（不被广告 iframe 误导）', JSON.stringify(r.topKept));
+    assert(!r.topFailed.isTop && r.topFailed.frameId === 1 && r.topFailed.reason === 'child-top-failed',
+      '顶层分析失败时任何有内容子 frame 都优于空顶层', JSON.stringify(r.topFailed));
+    assert(r.allEmpty.isTop && r.allEmpty.reason === 'all-empty',
+      '全部无内容 → 兜底维持顶层', JSON.stringify(r.allEmpty));
+    assert(r.single.isTop && r.single.reason === 'top-only',
+      '单帧 → 维持顶层', JSON.stringify(r.single));
+  }
+
+  /* ---------- 用例 20：内嵌 iframe 正文端到端（同源子 frame 承载正文） ---------- */
+  console.log('\n[20] iframe 正文 · 父页极薄 + 同源子 frame 承载正文');
+  {
+    const pageI = await browser.newPage();
+    await pageI.goto('file://' + path.join(ROOT, 'test/fixtures', 'iframe-host.html'));
+    // 模拟 background allFrames 注入：向每个 frame（顶层 + 子 frame）注入完整脚本链
+    const frames = pageI.frames();
+    for (const fr of frames) {
+      for (const f of CONTENT_FILES) {
+        await fr.addScriptTag({ path: path.join(ROOT, f) });
+      }
+    }
+    // 各 frame 独立分析（popup 定向 INK_ANALYZE 的等价物）
+    const summaries = [];
+    for (const fr of frames) {
+      const isTop = fr === pageI.mainFrame();
+      const a = await fr.evaluate(async () => window.__inkmark.handleAnalyze({ includeComments: false }));
+      summaries.push({
+        frameId: isTop ? 0 : 1, isTop, ok: a.ok,
+        adapterId: a.adapter.id, badge: a.adapter.badge, words: a.stats.words,
+      });
+    }
+    // 选优在顶层上下文（frame-select.js 已随 CONTENT_FILES 注入？否——单独注入以复用同一实现）
+    await pageI.mainFrame().addScriptTag({ path: path.join(ROOT, 'src/core/frame-select.js') });
+    const pick = await pageI.evaluate((s) => window.InkFrameSelect.pickContentFrame(s), summaries);
+    // 从选中 frame 提取 Markdown
+    const chosenFrame = pick.isTop ? pageI.mainFrame() : frames.find((_, i) => i === 1);
+    const md = await chosenFrame.evaluate(async () => {
+      const res = await window.__inkmark.handleExport('markdown', { frontMatter: false, includeComments: false });
+      return res.markdown;
+    });
+    await pageI.close();
+
+    const top = summaries.find((s) => s.isTop);
+    const child = summaries.find((s) => !s.isTop);
+    assert(frames.length === 2, '父页 + 子 frame 共 2 个 frame', String(frames.length));
+    assert(!!child && child.words > top.words, '子 frame 字数显著多于顶层空壳',
+      JSON.stringify({ top: top.words, child: child && child.words }));
+    assert(!pick.isTop && pick.frameId === 1, '选优结果指向承载正文的子 frame', JSON.stringify(pick));
+    assert(md.includes('内嵌框架中的长文正文') && md.includes('顶层优先'),
+      '从选中子 frame 提取到完整正文 Markdown', md.slice(0, 80));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------

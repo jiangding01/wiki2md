@@ -13,6 +13,9 @@ const state = {
   busy: false, // 任一导出进行中：全部动作与选项互斥
   localAction: false, // 本 popup 发起的动作进行中（区分页面侧忙态广播的来源）
   autoSwitchedZip: false, // 鉴权站点自动切 zip 只做一次，用户手动切回后不再强制
+  frames: [{ frameId: 0 }], // 已注入的各 frame（注入服务返回）；默认仅顶层
+  frameId: null, // 选中的正文 frame；null=顶层（导出/分析消息不带 frameId，与历史一致）
+  contentFromFrame: false, // 正文来自内嵌子 frame（用于 popup 提示）
 };
 
 /**
@@ -75,6 +78,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const inject = await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: tab.id });
     if (!inject || !inject.ok) throw new Error((inject && inject.error) || '脚本注入失败');
+    // 已就绪的各 frame——单帧（绝大多数页面）走原路径，多帧才触发跨 frame 选优
+    if (Array.isArray(inject.frames) && inject.frames.length) state.frames = inject.frames;
     await analyze();
   } catch (e) {
     if ((tab.url || '').startsWith('file:')) {
@@ -94,15 +99,19 @@ async function persistPrefs(partial) {
   } catch (e) { /* 持久化失败不影响本次导出 */ }
 }
 
-/** 向页面发消息，注入尚未就绪时自动重试一次 */
+/**
+ * 向选中的正文 frame 发消息，注入尚未就绪时自动重试一次。
+ * state.frameId 为 null（顶层）时不带 frameId 选项——与历史行为逐字节一致。
+ */
 async function sendToPage(payload) {
+  const opts = state.frameId != null ? { frameId: state.frameId } : undefined;
   try {
-    return await chrome.tabs.sendMessage(state.tabId, payload);
+    return await chrome.tabs.sendMessage(state.tabId, payload, opts);
   } catch (e) {
     if (/Receiving end does not exist/i.test(e.message || '')) {
       await chrome.runtime.sendMessage({ type: 'INK_INJECT', tabId: state.tabId });
       await new Promise(r => setTimeout(r, 250));
-      return chrome.tabs.sendMessage(state.tabId, payload);
+      return chrome.tabs.sendMessage(state.tabId, payload, opts);
     }
     throw e;
   }
@@ -137,17 +146,15 @@ async function analyze(opts) {
   } else {
     status('正在更新分析…');
   }
+  const options = {
+    includeComments: $('opt-comments').checked,
+    // 「重新分析」按钮必须绕过页面侧提取缓存——URL 没变但内容变了时，
+    // 不带此标记的分析永远命中旧缓存，按钮等于摆设
+    forceRefresh: !!(opts && opts.force),
+  };
   let res = null;
   try {
-    res = await sendToPage({
-      type: 'INK_ANALYZE',
-      options: {
-        includeComments: $('opt-comments').checked,
-        // 「重新分析」按钮必须绕过页面侧提取缓存——URL 没变但内容变了时，
-        // 不带此标记的分析永远命中旧缓存，按钮等于摆设
-        forceRefresh: !!(opts && opts.force),
-      },
-    });
+    res = await analyzeSelectFrame(options);
   } catch (e) {
     res = { ok: false, error: e.message };
   }
@@ -160,6 +167,55 @@ async function analyze(opts) {
   // 结束时页面会广播 INK_BUSY:false 解除
   if (res.exporting) setBusy(true);
   if (quiet) status('');
+}
+
+/**
+ * 分析并选出正文所在 frame。
+ * 单帧（绝大多数页面）：直接走 sendToPage，state.frameId 保持 null——行为与历史一致。
+ * 多帧：向每个 frame 定向发 INK_ANALYZE，用 InkFrameSelect 选优，
+ *       之后所有分析/导出消息定向发往选中 frameId。
+ * @returns 选中 frame 的 INK_ANALYZE 结果
+ */
+async function analyzeSelectFrame(options) {
+  const frames = state.frames || [{ frameId: 0 }];
+
+  // 单帧快路径：不做任何多 frame 探测，零额外开销、行为不变
+  if (frames.length <= 1) {
+    state.frameId = null;
+    state.contentFromFrame = false;
+    return sendToPage({ type: 'INK_ANALYZE', options });
+  }
+
+  // 多帧：并行定向分析各 frame，收集摘要
+  const summaries = await Promise.all(frames.map(async (f) => {
+    const base = { frameId: f.frameId, isTop: f.frameId === 0, ok: false };
+    try {
+      const r = await chrome.tabs.sendMessage(
+        state.tabId, { type: 'INK_ANALYZE', options }, { frameId: f.frameId });
+      if (!r || !r.ok) return Object.assign(base, { res: r });
+      return {
+        frameId: f.frameId, isTop: f.frameId === 0, ok: true,
+        adapterId: r.adapter && r.adapter.id,
+        badge: r.adapter && r.adapter.badge,
+        words: (r.stats && r.stats.words) || 0,
+        res: r,
+      };
+    } catch (e) {
+      // 某子 frame 不可达（注入竞态等）：记为无效，不影响其它 frame 选优
+      return Object.assign(base, { error: e.message });
+    }
+  }));
+
+  const pick = window.InkFrameSelect.pickContentFrame(summaries);
+  state.frameId = pick.isTop ? null : pick.frameId;
+  state.contentFromFrame = !pick.isTop;
+
+  const chosen = summaries.find((s) => s.frameId === pick.frameId);
+  if (chosen && chosen.res && chosen.res.ok) return chosen.res;
+  // 兜底：选中帧无有效结果时，退回顶层结果（若有），否则报错
+  const topRes = summaries.find((s) => s.isTop && s.res);
+  if (topRes && topRes.res) { state.frameId = null; state.contentFromFrame = false; return topRes.res; }
+  return { ok: false, error: '未能从任一框架提取到正文内容' };
 }
 
 /* ---------- 渲染 ---------- */
@@ -195,6 +251,11 @@ function renderAnalysis(res) {
   // 鉴权站点（Confluence/飞书/语雀）的图片带登录态，远程链接在本地 md 里打不开：
   // 本次会话自动切到「本地打包」（只影响这一次，不改用户的全局默认，可手动切回）
   const notes = (res.warnings || []).slice();
+  // 正文取自内嵌 iframe（邮箱/在线预览器等）：明示来源，否则用户会疑惑
+  // 「适配器/字数怎么和顶层页面对不上」
+  if (state.contentFromFrame) {
+    notes.push('正文来自页面内嵌的框架（iframe），已自动定位并提取。');
+  }
   // 目录/容器页正文本来就近乎为空，「0 字」需要解释，否则像出了故障
   if (res.stats.words === 0 && res.adapter.id !== 'generic') {
     notes.push('本页正文几乎为空——可能是目录/容器页。' +
