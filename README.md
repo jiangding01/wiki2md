@@ -65,12 +65,13 @@
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 开发指南：零构建、测试、适配器开发 SOP |
 | [PRIVACY.md](PRIVACY.md) | 隐私说明与权限用途 |
 | [docs/DESIGN.md](docs/DESIGN.md) | 完整设计文档：架构决策、各平台适配策略、历次迭代记录 |
+| [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) | 真机验收清单：主路径（Confluence/飞书）定期线上抽检 |
 
 ## 开发与测试
 
 ```bash
 npm install playwright          # 测试依赖（仅本地）
-node test/e2e.js                # 真实 Chromium 中跑全管线断言（136 项）
+node test/e2e.js                # 真实 Chromium 中跑全管线断言（133 项）
 # 使用系统已有浏览器：CHROMIUM_PATH=/path/to/chrome node test/e2e.js
 ```
 

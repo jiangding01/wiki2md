@@ -2,6 +2,17 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。日志格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [未发布]
+
+### 内部
+
+- e2e 注入清单收敛为单一事实来源：测试改从 `background.js` 的 `CONTENT_FILES` 直接
+  解析，删除测试侧的手写第二副本（原靠用例 11 断言两份一致来防漂移，现在从根上
+  不存在第二份可漂移）；加载期即校验解析成功与文件存在性，用例 11 精简为「适配器
+  目录下每个文件都已注册进注入清单」这一条 background 覆盖不到的防漏注册断言
+- 新增 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) 真机验收清单：主路径（Confluence/飞书）
+  按固定节奏线上抽检，覆盖 e2e mock 原理上防不了的上游改版盲区
+
 ## [1.2.0] - 2026-07-11
 
 ### 新增

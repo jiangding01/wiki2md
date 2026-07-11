@@ -14,25 +14,24 @@ const fs = require('fs');
 
 const ROOT = path.resolve(__dirname, '..');
 
-const CONTENT_FILES = [
-  'src/lib/readability.js',
-  'src/lib/turndown.js',
-  'src/lib/turndown-plugin-gfm.js',
-  'src/lib/jszip.min.js',
-  'src/core/settings.js',
-  'src/core/ir.js',
-  'src/core/markdown.js',
-  'src/adapters/registry.js',
-  'src/adapters/generic.js',
-  'src/adapters/custom.js',
-  'src/adapters/confluence.js',
-  'src/adapters/feishu-docx.js',
-  'src/adapters/feishu.js',
-  'src/adapters/cn-sites.js',
-  'src/adapters/intl-sites.js',
-  'src/core/exporter.js',
-  'src/core/pipeline.js',
-];
+// 注入清单以 background.js 的 CONTENT_FILES 为唯一事实来源：
+// 测试注入的脚本链必须与线上完全一致，否则新增适配器漏改任意一侧
+// 都会造成「测试绿但线上注入失败」或「线上在跑但测试没测到」。
+function loadContentFiles() {
+  const src = fs.readFileSync(path.join(ROOT, 'src/background/background.js'), 'utf8');
+  const m = src.match(/const CONTENT_FILES = \[([\s\S]*?)\];/);
+  const files = m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : [];
+  if (!files.length) {
+    throw new Error('无法从 src/background/background.js 提取 CONTENT_FILES 注入清单，请检查其声明形式');
+  }
+  for (const f of files) {
+    if (!fs.existsSync(path.join(ROOT, f))) {
+      throw new Error(`CONTENT_FILES 中的文件不存在：${f}`);
+    }
+  }
+  return files;
+}
+const CONTENT_FILES = loadContentFiles();
 
 let failures = 0;
 
@@ -884,20 +883,15 @@ async function runPipeline(page, fixture, options) {
 
   await browser.close();
 
-  /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ---------- */
-  console.log('\n[11] 注入清单 · background 与测试/磁盘三方一致');
+  /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------
+     CONTENT_FILES 现在单源自 background.js（见文件顶部 loadContentFiles），
+     测试与线上不再有第二份手写副本可漂移；loadContentFiles 已在加载期校验
+     解析成功与文件存在性。这里补一条 background 覆盖不了的断言：
+     src/adapters 下每个适配器文件都必须进注入清单，防「写了新适配器忘记注册」。 */
+  console.log('\n[11] 注入清单 · 适配器全部已注册（单源自 background.js）');
   {
-    const bg = fs.readFileSync(path.join(ROOT, 'src/background/background.js'), 'utf8');
-    const m = bg.match(/const CONTENT_FILES = \[([\s\S]*?)\];/);
-    const bgFiles = m ? Array.from(m[1].matchAll(/'([^']+)'/g)).map(x => x[1]) : [];
-    assert(bgFiles.length > 0, '能从 background.js 解析出 CONTENT_FILES');
-    assert(JSON.stringify(bgFiles) === JSON.stringify(CONTENT_FILES),
-      'background 注入清单与测试清单一致',
-      `bg=${JSON.stringify(bgFiles)}\n    test=${JSON.stringify(CONTENT_FILES)}`);
-    const missing = bgFiles.filter(f => !fs.existsSync(path.join(ROOT, f)));
-    assert(missing.length === 0, '清单内文件全部存在于磁盘', missing.join(', '));
     const adapterFiles = fs.readdirSync(path.join(ROOT, 'src/adapters')).map(f => 'src/adapters/' + f);
-    const unregistered = adapterFiles.filter(f => !bgFiles.includes(f));
+    const unregistered = adapterFiles.filter(f => !CONTENT_FILES.includes(f));
     assert(unregistered.length === 0, '所有适配器文件都已注册进注入清单', unregistered.join(', '));
   }
 
