@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>在线预览器 · 外壳页</title>
+</head>
+<body>
+  <!-- 父页面本身几乎没有正文：只有一个工具条外壳，真正的正文在下方 iframe 里
+       （模拟邮箱/在线文档预览器：顶层是应用外壳，内容承载于内嵌框架）。 -->
+  <header>
+    <nav>预览器工具条：打印 · 下载 · 分享</nav>
+  </header>
+  <main>
+    <iframe id="viewer" src="iframe-content.html" title="文档正文" width="800" height="600"></iframe>
+  </main>
+</body>
+</html>
