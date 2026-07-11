@@ -881,6 +881,108 @@ async function runPipeline(page, fixture, options) {
       '%28 形态被拒后按字面括号重试抓取成功', JSON.stringify(r.retry.calls));
   }
 
+  /* ---------- 用例 18：预览页锚点级同步滚动 · marked token 行号映射（纯函数） ----------
+     ROADMAP 远期项：双栏对照视图同步滚动从「比例映射」改为「块级锚点精确对齐」。
+     核心算法在 src/preview/preview-sync.js（InkPreviewSync），不碰 DOM，可以脱离
+     chrome.* 环境单独加载——这里只注入 marked + 该文件做断言。顺带验证一条
+     preview.js 判定映射是否可信的前提：「token 数 == 渲染出的顶层 DOM 节点数」，
+     在真实浏览器 marked.parse 输出上确实成立。 */
+  console.log('\n[18] InkPreviewSync · 预览页锚点级同步滚动映射算法');
+  {
+    const page4 = await browser.newPage();
+    await page4.goto('about:blank');
+    await page4.addScriptTag({ path: path.join(ROOT, 'src/lib/marked.umd.js') });
+    await page4.addScriptTag({ path: path.join(ROOT, 'src/preview/preview-sync.js') });
+    const r = await page4.evaluate(() => {
+      // 典型文档：front matter + 多级标题 + 长段落 + 代码块 + 表格 + 引用 + 列表
+      const md = [
+        '---',
+        'title: "T"',
+        '---',
+        '',
+        '# 一级标题',
+        '',
+        '## 二级标题',
+        '',
+        '这是第一段，用来验证长段落场景下的行号依旧精确对齐，不受自动换行影响，这是第一段，用来验证长段落场景下的行号依旧精确对齐，不受自动换行影响。',
+        '',
+        '```js',
+        'const a = 1;',
+        'const b = 2;',
+        '```',
+        '',
+        '| 列1 | 列2 |',
+        '| --- | --- |',
+        '| a | b |',
+        '',
+        '> 引用块',
+        '',
+        '- 列表项一',
+        '- 列表项二',
+      ].join('\n');
+
+      const map = InkPreviewSync.buildBlockMap(md, marked.lexer);
+      const blocks = (map && map.blocks) || [];
+      const out = { mapOk: !!map, blocks };
+
+      // DOM 侧交叉验证：token 数应与真实渲染出的顶层节点数一致
+      const { body } = InkPreviewSync.splitFrontMatter(md);
+      const div = document.createElement('div');
+      div.innerHTML = marked.parse(body, { breaks: false, gfm: true });
+      out.domChildCount = div.children.length;
+
+      // 定位 / 反定位往返：每个块自身起点应互为逆运算
+      out.roundTrip = blocks.length > 0 && blocks.every((b) => {
+        const loc = InkPreviewSync.locate(blocks, b.startLine);
+        const back = InkPreviewSync.unlocate(blocks, loc.blockIndex, loc.fraction);
+        return loc.blockIndex === b.index && back === b.startLine;
+      });
+
+      // 边界：文档最前（落在 front matter 里）/ 远超末尾的行号钳制到首尾块
+      const first = blocks.length ? InkPreviewSync.locate(blocks, 1) : null;
+      const last = blocks.length ? InkPreviewSync.locate(blocks, 9999) : null;
+      out.clampFirst = !!first && first.blockIndex === 0 && first.fraction === 0;
+      out.clampLast = !!last && last.blockIndex === blocks.length - 1 && last.fraction === 1;
+
+      // 回退分支：空文档 / 空白文档 / lex 非函数 / lex 抛异常，一律 null
+      // （调用方据此回退旧版比例同步，不能因此完全不同步）
+      out.fallback = {
+        empty: InkPreviewSync.buildBlockMap('', marked.lexer),
+        blank: InkPreviewSync.buildBlockMap('   \n\t\n  ', marked.lexer),
+        badLex: InkPreviewSync.buildBlockMap(md, 'not-a-function'),
+        throws: InkPreviewSync.buildBlockMap('# x', () => { throw new Error('boom'); }),
+      };
+      return out;
+    });
+    await page4.close();
+
+    assert(r.mapOk, '典型 markdown（多级标题/长段落/代码块/表格/引用/列表）成功建立映射');
+    const types = r.blocks.map((b) => b.type);
+    assert(JSON.stringify(types) ===
+      JSON.stringify(['heading', 'heading', 'paragraph', 'code', 'table', 'blockquote', 'list']),
+      '顶层块类型与文档结构一致（H1/H2/长段落/代码块/表格/引用/列表）', JSON.stringify(types));
+    assert(r.domChildCount === r.blocks.length,
+      'token 数与真实渲染出的顶层 DOM 节点数一致（preview.js 判定映射可信的前提）',
+      `${r.blocks.length} vs ${r.domChildCount}`);
+    assert(r.blocks[0] && r.blocks[0].startLine === 5,
+      'front matter 行数正确计入偏移：H1 定位到源码第 5 行', r.blocks[0] && r.blocks[0].startLine);
+    assert(r.blocks[1] && r.blocks[1].startLine === 7, 'H2 定位到第 7 行', r.blocks[1] && r.blocks[1].startLine);
+    assert(r.blocks[2] && r.blocks[2].startLine === 9,
+      '长段落定位到第 9 行（不受 textarea 自动换行影响，算法只看逻辑行）', r.blocks[2] && r.blocks[2].startLine);
+    assert(r.blocks[3] && r.blocks[3].startLine === 11 && r.blocks[3].endLine >= 14,
+      '代码块起点第 11 行、跨度覆盖到收尾围栏', JSON.stringify(r.blocks[3]));
+    assert(r.blocks[4] && r.blocks[4].startLine === 16, '表格定位到第 16 行', r.blocks[4] && r.blocks[4].startLine);
+    assert(r.blocks[5] && r.blocks[5].startLine === 20, '引用块定位到第 20 行', r.blocks[5] && r.blocks[5].startLine);
+    assert(r.blocks[6] && r.blocks[6].startLine === 22, '列表定位到第 22 行', r.blocks[6] && r.blocks[6].startLine);
+    assert(r.roundTrip, 'locate/unlocate 对每个块起点互为逆运算', JSON.stringify(r.blocks));
+    assert(r.clampFirst, '文档最前的行号（落在 front matter 里）钳制到第一块开头');
+    assert(r.clampLast, '远超文档末尾的行号钳制到最后一块末尾');
+    assert(r.fallback.empty === null && r.fallback.blank === null &&
+           r.fallback.badLex === null && r.fallback.throws === null,
+      '空文档 / 空白文档 / 非法 lex / lex 抛异常均返回 null，交由调用方回退比例同步',
+      JSON.stringify(r.fallback));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------
