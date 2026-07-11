@@ -15,7 +15,7 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
   color: #fff8f0;
   font-family: var(--font-brand);
   font-size: 24px; font-weight: 700;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   box-shadow: inset 0 0 0 2px rgba(255,248,240,.35), 0 3px 8px rgba(192,57,43,.3);
   transform: rotate(-3deg);
 }
@@ -25,7 +25,7 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
 .card {
   background: var(--paper-raised);
   border: 1px solid var(--paper-line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   padding: 16px 20px;
   margin-bottom: 16px;
@@ -40,7 +40,7 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
 .perm-desc code {
   font-family: var(--font-mono); font-size: 11.5px;
   background: var(--paper-sunken); border: 1px solid var(--paper-line);
-  border-radius: 4px; padding: 0 4px;
+  border-radius: var(--radius-xs); padding: 0 4px;
 }
 .perm-denied { margin-top: 14px; font-size: 12.5px; color: var(--cinnabar); }
 
@@ -63,7 +63,7 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
 }
 .tab-item:last-child { border-bottom: none; }
 .tab-item input { flex: none; accent-color: var(--cinnabar); }
-.tab-favicon { flex: none; width: 16px; height: 16px; border-radius: 3px; }
+.tab-favicon { flex: none; width: 16px; height: 16px; border-radius: var(--radius-xs); }
 .tab-info { flex: 1; min-width: 0; }
 /* display:block 是省略号生效的前提——行内元素不裁剪，长 URL 会撑破容器 */
 .tab-title {
@@ -109,7 +109,7 @@ body { font-family: var(--font-ui); font-size: 14px; background: var(--paper); c
 .btn-primary {
   padding: 11px 28px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: linear-gradient(145deg, var(--cinnabar), var(--cinnabar-deep));
   color: #fff8f0;
   font-size: 14px;

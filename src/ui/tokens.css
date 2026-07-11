@@ -24,11 +24,45 @@
   --amber-line: #ecd9b0;
   --amber-ink: #8a6d3b;
 
-  --radius: 10px;
+  /* 圆角刻度：同一层级用同一档，嵌套元素按「外圆角 − 内边距」向内递减。
+     lg=卡片/主次动作按钮 · md=输入框/分段容器/印章 · sm=小按钮/警告条/内嵌钮 · xs=kbd/行内 code/favicon */
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --radius-xs: 4px;
+  --radius: var(--radius-lg); /* 兼容别名：历史用法等同 lg */
   --shadow-card: 0 1px 2px rgba(43, 39, 35, 0.05), 0 4px 14px rgba(43, 39, 35, 0.06);
   --font-ui: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   --font-brand: "Songti SC", "Noto Serif SC", "SimSun", Georgia, serif;
   --font-mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+}
+
+/* ---------- 四页共享的可访问性基线 ---------- */
+
+/* 键盘焦点态：所有可聚焦元素统一朱砂描边。
+   文本输入类除外——它们已有边框高亮 + 光标反馈，再加描边是双重噪音 */
+:focus-visible {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: 2px;
+}
+input:where([type="text"], [type="search"], :not([type])):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+/* 自绘开关的输入框视觉上不可见（opacity:0），焦点态转移到滑轨上 */
+.toggle input:focus-visible + i {
+  outline: 2px solid var(--cinnabar);
+  outline-offset: 2px;
+}
+
+/* 减动效偏好：动画/过渡全部瞬时完成，加载态仍有文字提示兜底 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

@@ -382,18 +382,43 @@ async function doPreview() {
 
 /* ---------- 事件 ---------- */
 
+/**
+ * 面板内联询问（替代原生 confirm——系统弹窗会跳出面板视觉语境且个别平台生硬）。
+ * 显示 #ask-bar，返回 Promise<boolean>：主按钮 true / 次按钮 false。
+ * 询问期间不锁其它控件——用户点别处操作视为放弃询问（按 false 处理并收起）。
+ */
+function askInline(text, yesLabel, noLabel) {
+  const bar = $('ask-bar');
+  $('ask-text').textContent = text;
+  $('ask-yes').textContent = yesLabel;
+  $('ask-no').textContent = noLabel;
+  bar.classList.remove('hidden');
+  $('ask-yes').focus();
+  return new Promise((resolve) => {
+    const done = (val) => {
+      bar.classList.add('hidden');
+      $('ask-yes').onclick = $('ask-no').onclick = null;
+      document.removeEventListener('keydown', onKey, true);
+      resolve(val);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    $('ask-yes').onclick = () => done(true);
+    $('ask-no').onclick = () => done(false);
+    document.addEventListener('keydown', onKey, true);
+  });
+}
+
 async function doExportTree() {
   if (state.busy) return;
 
-  // 续传探测：同根页面有未完成导出时，先问用户「继续（从下一卷起）/重新开始」。
-  // confirm 是 popup 里最小的交互——复用现有进度文案机制，不新增 UI 结构。
+  // 续传探测：同根页面有未完成导出时，先问用户「继续（从下一卷起）/重新开始」
   let resume = false;
   try {
     const st = await sendToPage({ type: 'INK_TREE_STATUS', options: exportOptions() });
     if (st && st.ok && st.resumable) {
-      resume = window.confirm(
-        `检测到「${st.rootTitle || '本页面树'}」有未完成的导出（已下载 ${st.volumesDownloaded} 卷、${st.pagesDone} 页）。\n\n` +
-        `点「确定」从第 ${st.volumesDownloaded + 1} 卷继续，点「取消」重新开始。`);
+      resume = await askInline(
+        `检测到「${st.rootTitle || '本页面树'}」有未完成的导出（已下载 ${st.volumesDownloaded} 卷、${st.pagesDone} 页）。`,
+        `从第 ${st.volumesDownloaded + 1} 卷继续`, '重新开始');
     }
   } catch (e) { /* 探测失败按普通导出处理 */ }
 
