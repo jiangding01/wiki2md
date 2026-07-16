@@ -1338,6 +1338,7 @@ async function runPipeline(page, fixture, options) {
       const lite = await XAdapter.extract({ analyzeOnly: true, includeComments: true });
       return {
         matched, md,
+        title: ir.title,
         byline: ir.byline,
         publishedTime: ir.publishedTime,
         annotations: ir.annotations.map(a => ({ author: a.author, content: a.content })),
@@ -1349,6 +1350,8 @@ async function runPipeline(page, fixture, options) {
     });
     await pageX.close();
     assert(x.matched, 'x.com/twitter.com 的 /status/ 页面命中适配器');
+    assert(x.title === 'Ink Author：虚拟滚动的正确姿势🚀',
+      '推文标题 = 作者 + 正文首行（不再是 document.title 的整条推文形态）', x.title);
     assert(x.byline === 'Ink Author @inkauthor', '作者与 @handle 提取', x.byline);
     assert(x.publishedTime === '2026-07-15T08:00:00.000Z', '发布时间取主推 datetime');
     assert(x.md.includes('虚拟滚动的正确姿势🚀') && x.md.includes('第一段结论'),

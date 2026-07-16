@@ -19,7 +19,8 @@ body {
   background: var(--paper-raised);
   border-bottom: 1px solid var(--paper-line);
 }
-.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.brand > div { min-width: 0; } /* 标题列可收缩，长标题/文件名才会触发省略 */
 .seal {
   flex: none;
   width: 36px; height: 36px;
@@ -36,11 +37,14 @@ body {
   font-family: var(--font-brand);
   font-size: 16px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-width: 46vw;
 }
-.sub { font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); }
+.sub {
+  display: block;
+  font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
-.toolbar { display: flex; align-items: center; gap: 10px; }
+.toolbar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; } /* 长标题下按钮不被压缩折行 */
 
 .segmented {
   display: flex; gap: 2px;
@@ -53,6 +57,7 @@ body {
   border: none; background: transparent;
   font-size: 12px; color: var(--ink-soft);
   padding: 5px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  white-space: nowrap;
   transition: color .15s, background .15s, box-shadow .15s;
 }
 .seg-btn.active {
@@ -63,6 +68,7 @@ body {
 }
 
 .btn-primary, .btn-ghost {
+  white-space: nowrap;
   padding: 7px 15px;
   border-radius: var(--radius-md);
   font-size: 12.5px;
@@ -103,6 +109,8 @@ body[data-view="rendered"] .pane-source { display: none; }
 body[data-view="source"] .pane-rendered { display: none; }
 
 #rendered { max-width: 820px; margin: 0 auto; padding: 10px 26px 80px; }
+/* 对照视图左栏本就只有半屏，再限宽会留出大片空白——撑满可用宽度 */
+body[data-view="split"] #rendered { max-width: none; }
 #source {
   flex: 1;
   font-family: var(--font-mono);

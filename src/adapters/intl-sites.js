@@ -136,7 +136,7 @@ var XAdapter = window.XAdapter || {
     }
 
     const ir = InkIR.create({
-      title: InkIR.pickTitle(null, /\s*[\/|]\s*X\s*$/),
+      title: this._tweetTitle(main),
       byline: [main.author, main.handle].filter(Boolean).join(' '),
       siteName: 'X (Twitter)',
       publishedTime: main.time,
@@ -272,6 +272,15 @@ var XAdapter = window.XAdapter || {
     }
     if (opts.analyzeOnly) ir._lite = true;
     return ir;
+  },
+
+  /** 推文标题：作者 + 正文首行截断——document.title 是『(N) 作者 on X: "全文"』
+   *  形态，整条推文进标题会撑爆 H1 与文件名 */
+  _tweetTitle(main) {
+    const firstLine = (main.text || '').split('\n')[0].trim();
+    const brief = firstLine.length > 50 ? firstLine.slice(0, 50) + '…' : firstLine;
+    if (main.author && brief) return `${main.author}：${brief}`;
+    return brief || this._articleTitle();
   },
 
   /** Article 标题：document.title 的『作者 on X: "标题"』形态最可靠（可含未读计数前缀） */
