@@ -197,7 +197,15 @@ var InkExporter = window.InkExporter || {
         markdown: markdown.length <= 300_000 ? markdown : null,
       };
       const { inkmarkHistory = [] } = await chrome.storage.local.get('inkmarkHistory');
-      const list = [entry].concat(inkmarkHistory).slice(0, 30);
+      // 同一文档重复导出只保留最新一条：反复测试同一页面会把 30 条额度
+      // 挤满（真实反馈）。去重 key 用 URL+标题——hash 路由的 SPA 不同文章
+      // URL 可能相同，加标题防误合并；节选（selection）的价值在选区内容
+      // 本身，同一页面的不同选区是不同产出，不参与去重。
+      const key = (e) => `${e.url}|${e.title}`;
+      const rest = entry.action === 'selection'
+        ? inkmarkHistory
+        : inkmarkHistory.filter(e => e.action === 'selection' || key(e) !== key(entry));
+      const list = [entry].concat(rest).slice(0, 30);
       let budget = 3_000_000;
       for (const e of list) {
         if (e.markdown) {

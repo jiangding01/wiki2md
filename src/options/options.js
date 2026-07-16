@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 历史
   await renderHistory();
   $('btn-clear-history').addEventListener('click', async () => {
+    if (!confirm('确定清空全部导出历史？此操作不可恢复。')) return;
     await chrome.storage.local.remove('inkmarkHistory');
     await renderHistory();
   });
@@ -152,6 +153,17 @@ async function renderHistory() {
       }));
     }
     actions.appendChild(miniBtn('原文', () => { window.open(entry.url, '_blank'); }));
+    actions.appendChild(miniBtn('删除', async () => {
+      // 以内容特征定位而非界面索引：期间可能有新导出写入，索引会漂移
+      const { inkmarkHistory: cur = [] } = await chrome.storage.local.get('inkmarkHistory');
+      const idx = cur.findIndex(e =>
+        e.ts === entry.ts && e.url === entry.url && e.action === entry.action);
+      if (idx !== -1) {
+        cur.splice(idx, 1);
+        await chrome.storage.local.set({ inkmarkHistory: cur });
+      }
+      await renderHistory();
+    }));
 
     item.appendChild(info);
     item.appendChild(actions);

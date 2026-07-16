@@ -1273,6 +1273,37 @@ async function runPipeline(page, fixture, options) {
       '样式加粗 + 编辑器 strong 混排整句缝合（不双重包裹）', w.md.split('\n').find(l => l.includes('看完点赞')));
   }
 
+  /* ---------- 用例 22：导出历史去重（同文档只留最新，节选豁免） ---------- */
+  console.log('\n[22] 导出历史 · URL+标题去重 / 节选不去重');
+  {
+    const pageH = await browser.newPage();
+    await pageH.goto('file://' + path.join(ROOT, 'test/fixtures', 'generic-article.html'));
+    for (const f of CONTENT_FILES) {
+      await pageH.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const h = await pageH.evaluate(async () => {
+      // fixture 环境无 chrome.storage：注入内存 mock 驱动 recordHistory
+      const store = {};
+      window.chrome = { storage: { local: {
+        get: async (key) => ({ [key]: store[key] }),
+        set: async (obj) => { Object.assign(store, obj); },
+      } } };
+      const rec = (title, action, url) => InkExporter.recordHistory(
+        { title, url: url || 'https://x.com/a', _adapter: { name: 'T' } },
+        'md-body', title + '.md', action);
+      await rec('文档A', 'download');
+      await rec('文档A', 'copy');        // 同 URL+标题：旧条目被顶掉
+      await rec('文档B', 'download');    // 同 URL 不同标题（hash 路由 SPA）：保留
+      await rec('节选A', 'selection');
+      await rec('节选A', 'selection');   // 节选同名：不去重
+      return store.inkmarkHistory.map(e => `${e.title}:${e.action}`);
+    });
+    await pageH.close();
+    assert(JSON.stringify(h) ===
+           JSON.stringify(['节选A:selection', '节选A:selection', '文档B:download', '文档A:copy']),
+      '同文档重复导出只留最新；不同标题与节选均保留', JSON.stringify(h));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------
