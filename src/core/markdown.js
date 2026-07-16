@@ -338,6 +338,22 @@ var InkMarkdown = window.InkMarkdown || {
     });
   },
 
+  /**
+   * 合并紧邻的同类强调元素：<strong>a</strong><strong>b</strong>（中间无任何
+   * 文本节点）会被 Turndown 输出成 `**a****b**`——四连星号在渲染器里解析错乱。
+   * 富文本编辑器（微信公众号等）常把一句话按样式段拆成多个 strong，此处在
+   * DOM 层合并，对所有站点生效。
+   */
+  mergeAdjacentEmphasis(root) {
+    root.querySelectorAll('strong, b, em, i').forEach((el) => {
+      const prev = el.previousSibling;
+      if (prev && prev.nodeType === 1 && prev.tagName === el.tagName) {
+        while (el.firstChild) prev.appendChild(el.firstChild);
+        el.remove();
+      }
+    });
+  },
+
   /** YAML Front Matter。值内换行会破坏 YAML 结构，统一压成空格。
    *  反斜杠必须最先转义——标题以 \ 结尾时会吃掉闭合引号，front matter 直接损坏。 */
   buildFrontMatter(ir, opts) {
@@ -564,6 +580,7 @@ var InkMarkdown = window.InkMarkdown || {
     let workEl = null;
     if (ir.contentEl) {
       workEl = ir.contentEl.cloneNode(true);
+      this.mergeAdjacentEmphasis(workEl);
       this.prepareTables(workEl, opts);
     }
     const td = this.createTurndown(opts);

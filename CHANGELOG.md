@@ -2,6 +2,22 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。日志格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+## [未发布]
+
+### 修复
+
+- **微信公众号新版编辑器适配**（用户实测 DOM 驱动）：
+  - 图片改用 `data-src` 原图——页面 JS 会把 `src` 填成 `tp=webp&wx_lazy=1`
+    的懒加载低清版，此前导出的正是这个必裂版本；同时标记 `authImages`
+    （图床 referer 防盗链，远程链接在本地 md 必裂），popup 会建议本地打包
+  - 样式粗体语义化：新版编辑器不再输出 `<strong>`，加粗是 `span[textstyle]`
+    的 inline `font-weight`（生效值由自内向外第一个声明决定）——此前小节
+    标题等加粗全部丢失；已有 strong 祖先的不重复包裹
+  - 转换层新增「紧邻同类强调合并」（所有站点生效）：编辑器把一句话按样式
+    段拆成多个 `<strong>` 时，Turndown 会输出解析错乱的 `**a****b**`，
+    现在 DOM 层缝合为整句加粗
+  - 新版正文 DOM 存入 `test/fixtures/wechat-article.html`，e2e 新增 8 项断言
+
 ## [1.3.0] - 2026-07-11
 
 ### 新增

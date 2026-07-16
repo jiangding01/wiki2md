@@ -1241,6 +1241,38 @@ async function runPipeline(page, fixture, options) {
       '从选中子 frame 提取到完整正文 Markdown', md.slice(0, 80));
   }
 
+  /* ---------- 用例 21：微信公众号新版编辑器（2026-07 用户实测 DOM） ---------- */
+  console.log('\n[21] 微信公众号 · 新版编辑器（样式粗体 / data-src 原图 / 相邻加粗合并）');
+  {
+    const pageW = await browser.newPage();
+    await pageW.goto('file://' + path.join(ROOT, 'test/fixtures', 'wechat-article.html'));
+    for (const f of CONTENT_FILES) {
+      await pageW.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    // file:// 下 hostname 不是 mp.weixin.qq.com，绕过 match 直接调 extract
+    const w = await pageW.evaluate(async () => {
+      const ir = await WechatAdapter.extract();
+      const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: false });
+      return { md, title: ir.title, byline: ir.byline, authImages: !!WechatAdapter.authImages };
+    });
+    await pageW.close();
+    assert(w.title === '测试文章标题' && w.byline === '测试公众号', '标题/公众号名提取');
+    assert(w.authImages, 'authImages 标记（图床 referer 防盗链，popup 建议本地打包）');
+    assert(!w.md.includes('wx_lazy=1') && !w.md.includes('tp=webp') &&
+           w.md.includes('640?wx_fmt=jpeg&watermark=1#imgIndex=0'),
+      '图片用 data-src 原图而非懒加载低清版', w.md.split('\n').find(l => l.startsWith('![')));
+    assert(w.md.includes('**1、市场**') && w.md.includes('**2、流动性情况**'),
+      '新版编辑器的样式粗体（span[textstyle]）→ **加粗**');
+    assert(w.md.includes('最近的市场没啥需要多说的了') &&
+           !w.md.includes('**最近的市场'),
+      'textstyle 覆盖为 normal 的正文不误加粗');
+    assert(!w.md.includes('****'), '相邻加粗片段无 **** 拼接');
+    assert(w.md.includes('**用好策略挽救一切追高套牢，就这样。**'),
+      '相邻 strong 合并为整句加粗');
+    assert(w.md.includes('**看完点赞，早赞早赚。欢迎评论区提问，跟亏损说拜拜！**'),
+      '样式加粗 + 编辑器 strong 混排整句缝合（不双重包裹）', w.md.split('\n').find(l => l.includes('看完点赞')));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------
