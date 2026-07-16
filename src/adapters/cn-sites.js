@@ -9,17 +9,23 @@ var WechatAdapter = window.WechatAdapter || {
   id: 'wechat',
   name: '微信公众号',
   badge: 'precise',
-
-  match(loc) {
-    return loc.hostname === 'mp.weixin.qq.com';
-  },
+  // 微信图床有 referer 防盗链（非登录态，但效果相同）：远程链接在本地 md
+  // 里必然裂图，popup 据此建议本地打包（页面内 fetch 自带 referer，能下载）
+  authImages: true,
 
   async extract() {
     const source = document.querySelector('#js_content');
     if (!source) return GenericAdapter.extract();
 
-    // 公众号图片全是 data-src 懒加载，buildContainer 的标准序列已覆盖
-    const container = InkIR.buildContainer(source, ['mpvoice', 'mp-common-profile', 'qqmusic']);
+    const container = document.createElement('div');
+    container.appendChild(InkIR.detach(source));
+    // data-src 是原始图 URL；页面 JS 会把 src 填成 tp=webp&wx_lazy=1 的
+    // 懒加载低清版——src 非空所以 fixLazyImages 不会覆盖，这里强制还原原图
+    container.querySelectorAll('img[data-src]').forEach((img) => {
+      img.setAttribute('src', img.getAttribute('data-src'));
+    });
+    this._semanticizeBoldSpans(container);
+    InkIR.normalizeContainer(container, ['mpvoice', 'mp-common-profile', 'qqmusic', 'mp-style-type']);
 
     return InkIR.create({
       title: InkIR.pickTitle('#activity-name, h1.rich_media_title'),
@@ -27,6 +33,44 @@ var WechatAdapter = window.WechatAdapter || {
       siteName: '微信公众号',
       publishedTime: InkIR.pickText('#publish_time'),
       contentEl: container,
+    });
+  },
+
+  match(loc) {
+    return loc.hostname === 'mp.weixin.qq.com';
+  },
+
+  /**
+   * 新版公众号编辑器的粗体不再输出 <strong>，而是 span 的 inline style：
+   * 外层排版 span 常带 font-weight:bold，内层 <span textstyle> 再覆盖为
+   * normal/bold——生效值由「自内向外第一个 font-weight 声明」决定。
+   * 把纯样式加粗的文本叶子（span[leaf]）包上 <strong>，Turndown 才能识别。
+   * （斜体在公众号编辑器里没有对应形态，暂不处理。）
+   */
+  _semanticizeBoldSpans(container) {
+    // 生效 font-weight：自内向外第一个声明说了算（STRONG/B 视为 bold 声明）
+    const effectiveBold = (start) => {
+      for (let el = start; el && el !== container; el = el.parentElement) {
+        if (/^(STRONG|B)$/.test(el.tagName)) return true;
+        const fw = (el.style && el.style.fontWeight) || '';
+        if (fw) return fw === 'bold' || fw === 'bolder' || parseInt(fw, 10) >= 600;
+      }
+      return false;
+    };
+    container.querySelectorAll('span[leaf]').forEach((sp) => {
+      if (!sp.textContent.trim()) return;
+      // 已有语义加粗祖先的不再处理——编辑器自产的 <strong> 内部 span 往往
+      // 也带 font-weight:bold 样式，只看样式会双重包裹出嵌套 strong
+      if (sp.closest('strong, b')) return;
+      // 样式覆盖点在 leaf 内的 textstyle span（若有），从它开始向外找生效值
+      const start = sp.querySelector('[textstyle]') || sp;
+      if (!effectiveBold(start)) return;
+      // strong 包在 leaf 外层：与编辑器自产的 <strong><span leaf>> 同构，
+      // 相邻加粗片段才能被 mergeAdjacentEmphasis 缝合（包在内层会隔着
+      // span 边界拼出 `****`）
+      const strong = document.createElement('strong');
+      sp.replaceWith(strong);
+      strong.appendChild(sp);
     });
   },
 };
