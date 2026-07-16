@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Ink Author on X: "虚拟滚动的正确姿势" / X</title></head>
+<body>
+<!-- 仿真 X 推文详情页（data-testid 锚点与线上一致；class 为动态哈希故省略）
+     页面 URL 形态：https://x.com/inkauthor/status/1001 -->
+<main>
+  <!-- 主推文 -->
+  <article data-testid="tweet">
+    <div data-testid="User-Name">
+      <span>Ink Author</span><span>@inkauthor</span><span>·</span>
+    </div>
+    <a href="/inkauthor/status/1001"><time datetime="2026-07-15T08:00:00.000Z">Jul 15</time></a>
+    <div data-testid="tweetText"><span>虚拟滚动的正确姿势</span><img alt="🚀"><br><span>第一段结论：只渲染视口附近的节点。</span></div>
+    <div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/ABC123?format=jpg&amp;name=small"></div>
+  </article>
+  <!-- thread 续推（同 handle，紧随其后 → 并入正文） -->
+  <article data-testid="tweet">
+    <div data-testid="User-Name">
+      <span>Ink Author</span><span>@inkauthor</span><span>·</span>
+    </div>
+    <a href="/inkauthor/status/1002"><time datetime="2026-07-15T08:01:00.000Z">Jul 15</time></a>
+    <div data-testid="tweetText"><span>补充：测量缓存是第二个关键。</span></div>
+  </article>
+  <!-- 回复 1 -->
+  <article data-testid="tweet">
+    <div data-testid="User-Name">
+      <span>Reader One</span><span>@reader1</span><span>·</span>
+    </div>
+    <a href="/reader1/status/2001"><time datetime="2026-07-15T09:00:00.000Z">Jul 15</time></a>
+    <div data-testid="tweetText"><span>受教了，我们项目正好踩过这个坑</span><img alt="👍"></div>
+  </article>
+  <!-- 广告卡片（placementTracking → 剔除） -->
+  <article data-testid="tweet">
+    <div data-testid="placementTracking"></div>
+    <div data-testid="User-Name">
+      <span>Ad Corp</span><span>@adcorp</span>
+    </div>
+    <div data-testid="tweetText"><span>限时优惠快来买</span></div>
+  </article>
+  <!-- 回复 2（带图） -->
+  <article data-testid="tweet">
+    <div data-testid="User-Name">
+      <span>Reader Two</span><span>@reader2</span><span>·</span>
+    </div>
+    <a href="/reader2/status/2002"><time datetime="2026-07-15T10:00:00.000Z">Jul 15</time></a>
+    <div data-testid="tweetText"><span>贴一张我们的压测图</span></div>
+    <div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/DEF456?format=png&amp;name=small"></div>
+  </article>
+</main>
+</body>
+</html>

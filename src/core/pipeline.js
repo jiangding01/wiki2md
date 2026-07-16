@@ -578,5 +578,6 @@
   InkAdapters.register(CsdnAdapter);
   InkAdapters.register(YuqueAdapter);
   InkAdapters.register(StackOverflowAdapter);
+  InkAdapters.register(XAdapter);
   InkAdapters.register(GenericAdapter);
 })();

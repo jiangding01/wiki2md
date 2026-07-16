@@ -1320,6 +1320,48 @@ async function runPipeline(page, fixture, options) {
     assert(g.subTargeted === true, '显式定向（frameTargeted）的子 frame 消息正常处理');
   }
 
+  /* ---------- 用例 24：X (Twitter) 推文详情页 ---------- */
+  console.log('\n[24] XAdapter · 主推文+thread 正文 / 回复进评论区 / 广告剔除');
+  {
+    const pageX = await browser.newPage();
+    await pageX.goto('file://' + path.join(ROOT, 'test/fixtures', 'x-status.html'));
+    for (const f of CONTENT_FILES) {
+      await pageX.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    // file:// 下 hostname/URL 不匹配，绕过 match 直接调 extract
+    const x = await pageX.evaluate(async () => {
+      const matched = XAdapter.match(
+        { hostname: 'x.com', pathname: '/inkauthor/status/1001' });
+      const ir = await XAdapter.extract({ includeComments: true });
+      const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: true });
+      return {
+        matched, md,
+        byline: ir.byline,
+        publishedTime: ir.publishedTime,
+        annotations: ir.annotations.map(a => ({ author: a.author, content: a.content })),
+        warnings: ir.warnings,
+      };
+    });
+    await pageX.close();
+    assert(x.matched, 'x.com/twitter.com 的 /status/ 页面命中适配器');
+    assert(x.byline === 'Ink Author @inkauthor', '作者与 @handle 提取', x.byline);
+    assert(x.publishedTime === '2026-07-15T08:00:00.000Z', '发布时间取主推 datetime');
+    assert(x.md.includes('虚拟滚动的正确姿势🚀') && x.md.includes('第一段结论'),
+      '主推文正文（emoji 从 img alt 还原、换行分段）', x.md.slice(0, 120));
+    assert(x.md.includes('补充：测量缓存是第二个关键。'),
+      '同 handle 连续 thread 续推并入正文');
+    assert(x.md.includes('https://pbs.twimg.com/media/ABC123?format=jpg&name=large'),
+      '推文图片缩略参数升级为 name=large', x.md.split('\n').find(l => l.includes('pbs.twimg')));
+    assert(x.annotations.length === 2 &&
+           x.annotations[0].author === 'Reader One @reader1' &&
+           x.annotations[1].content.includes('压测图（含 1 图）'),
+      '回复进评论通道（含图标注），广告卡片被剔除', JSON.stringify(x.annotations));
+    assert(x.md.includes('## 💬 评论') && x.md.includes('受教了，我们项目正好踩过这个坑👍'),
+      '回复呈现在文末评论区（emoji 保留）');
+    assert(x.warnings.some(w => w.includes('2 条回复')),
+      '按需加载的局限性明示告警', x.warnings.join(' | '));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------
