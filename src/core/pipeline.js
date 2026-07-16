@@ -113,6 +113,9 @@
 
   async function handleAnalyze(options) {
     const settings = await loadSettings(options);
+    // analyzeOnly：允许适配器走轻量路径（X 的滚动采集会让页面闪白，
+    // 分析阶段不做；轻量产物带 _lite 标记，导出时会强制完整重提）
+    settings.analyzeOnly = true;
     const ir = await getIR(settings, !!(options && options.forceRefresh));
     return {
       ok: true,
@@ -129,6 +132,11 @@
   async function handleExport(action, options) {
     const settings = await loadSettings(options);
     let ir = await getIR(settings);
+    if (ir._lite) {
+      // 缓存里是分析阶段的轻量产物（X 等适配器不滚动采集的版本）：
+      // 导出必须完整——强制重提，完整版会覆盖缓存供后续复用
+      ir = await getIR(settings, true);
+    }
     if (settings.title && settings.title.trim()) {
       // popup 里用户可改标题——用浅拷贝覆盖，绝不改写共享缓存里的 IR
       // （直接改会污染后续所有 analyze/export，直到页面刷新）

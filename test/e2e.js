@@ -1334,12 +1334,17 @@ async function runPipeline(page, fixture, options) {
         { hostname: 'x.com', pathname: '/inkauthor/status/1001' });
       const ir = await XAdapter.extract({ includeComments: true });
       const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: true });
+      // 分析阶段的轻量路径：不滚动、产物带 _lite 标记（导出时强制完整重提）
+      const lite = await XAdapter.extract({ analyzeOnly: true, includeComments: true });
       return {
         matched, md,
         byline: ir.byline,
         publishedTime: ir.publishedTime,
         annotations: ir.annotations.map(a => ({ author: a.author, content: a.content })),
         warnings: ir.warnings,
+        fullHasLite: '_lite' in ir,
+        liteFlag: lite._lite === true,
+        liteWarn: lite.warnings.some(w => w.includes('导出时会自动滚动收集更多')),
       };
     });
     await pageX.close();
@@ -1360,6 +1365,9 @@ async function runPipeline(page, fixture, options) {
       '回复呈现在文末评论区（emoji 保留）');
     assert(x.warnings.some(w => w.includes('2 条回复')),
       '按需加载的局限性明示告警', x.warnings.join(' | '));
+    assert(x.liteFlag && !x.fullHasLite,
+      '分析走轻量路径（_lite 标记，不滚动防页面闪白）、导出产物无标记');
+    assert(x.liteWarn, '轻量分析的告警提示「导出时收集更多」');
   }
 
   await browser.close();

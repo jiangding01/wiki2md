@@ -90,7 +90,11 @@ var XAdapter = window.XAdapter || {
 
   async extract(options) {
     const opts = options || {};
-    const tweets = await this._harvestTweets();
+    // 两段式提取：分析（popup 打开即触发的高频操作）只解析已加载的 DOM——
+    // 滚动采集会让虚拟化时间线卸载重建视口节点，正文肉眼可见地闪白；
+    // 只有导出且需要评论时才滚动收集（用户主动触发、有进度提示）。
+    const full = !opts.analyzeOnly && opts.includeComments !== false;
+    const tweets = full ? await this._harvestTweets() : this._collectLoadedTweets();
     if (!tweets.length) {
       // 登录墙 / 结构变化：回退通用提取并明示，绝不空手而归
       const ir = await GenericAdapter.extract();
@@ -118,8 +122,9 @@ var XAdapter = window.XAdapter || {
 
     const warnings = [];
     if (replies.length) {
-      warnings.push(`已收集当前时间线加载的 ${replies.length} 条回复；` +
-        'X 按需分页加载，长对话可先手动滚动到底部再重新分析。');
+      warnings.push(full
+        ? `已收集 ${replies.length} 条回复；X 按需分页加载，长对话可先手动滚动到底部再导出。`
+        : `当前已加载 ${replies.length} 条回复，导出时会自动滚动收集更多。`);
     }
 
     const ir = InkIR.create({
@@ -139,19 +144,26 @@ var XAdapter = window.XAdapter || {
         content: t.text + (t.photos.length ? `（含 ${t.photos.length} 图）` : ''),
       }));
     }
+    // 轻量产物标记：pipeline 的导出路径据此判断缓存不可复用、强制完整重提
+    if (opts.analyzeOnly) ir._lite = true;
     return ir;
+  },
+
+  /** 只解析当前 DOM 已加载的推文（零滚动，分析阶段专用） */
+  _collectLoadedTweets(byKey) {
+    const map = byKey || new Map();
+    document.querySelectorAll('article[data-testid="tweet"]').forEach((el) => {
+      const t = this._parseTweet(el);
+      const key = t.statusId || t.text.slice(0, 80);
+      if (key && !map.has(key)) map.set(key, t);
+    });
+    return Array.from(map.values());
   },
 
   /** 滚动采集：时间线是虚拟化的，边滚边把 tweet 解析成纯数据、按 status id 去重 */
   async _harvestTweets() {
     const byKey = new Map();
-    const harvest = () => {
-      document.querySelectorAll('article[data-testid="tweet"]').forEach((el) => {
-        const t = this._parseTweet(el);
-        const key = t.statusId || t.text.slice(0, 80);
-        if (key && !byKey.has(key)) byKey.set(key, t);
-      });
-    };
+    const harvest = () => this._collectLoadedTweets(byKey);
     harvest();
     const scroller = document.scrollingElement || document.documentElement;
     const origin = scroller.scrollTop;
