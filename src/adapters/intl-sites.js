@@ -94,6 +94,12 @@ var XAdapter = window.XAdapter || {
     // 滚动采集会让虚拟化时间线卸载重建视口节点，正文肉眼可见地闪白；
     // 只有导出且需要评论时才滚动收集（用户主动触发、有进度提示）。
     const full = !opts.analyzeOnly && opts.includeComments !== false;
+
+    // Article（长文）模式：URL 同为 /status/<id>，但正文在 DraftJS 渲染的
+    // longform 组件里，推文卡片只是「封面+标题」的头卡（无 tweetText）
+    const longform = document.querySelector('[data-testid="longformRichTextComponent"]');
+    if (longform) return this._extractArticle(longform, opts, full);
+
     const tweets = full ? await this._harvestTweets() : this._collectLoadedTweets();
     if (!tweets.length) {
       // 登录墙 / 结构变化：回退通用提取并明示，绝不空手而归
@@ -149,10 +155,136 @@ var XAdapter = window.XAdapter || {
     return ir;
   },
 
-  /** 只解析当前 DOM 已加载的推文（零滚动，分析阶段专用） */
+  /**
+   * Article（长文）模式：正文 = DraftJS longform 组件的规范化克隆，
+   * 头卡（无 tweetText 的推文卡）提供作者/时间，时间线其余推文进评论区。
+   */
+  async _extractArticle(longformEl, opts, full) {
+    const container = document.createElement('div');
+    container.appendChild(InkIR.detach(longformEl));
+
+    // 嵌入推文/文章卡片 → 链接占位：整卡是复杂 UI（头像/操作栏/统计），
+    // 原样保留只会灌进海量噪音，转成可点击的引用链接
+    container.querySelectorAll('article[data-testid="tweet"]').forEach((card) => {
+      const section = card.closest('section') || card;
+      const link = card.querySelector('a[href*="/status/"], a[href*="/article/"]');
+      let href = '';
+      if (link) {
+        try { href = new URL(link.getAttribute('href'), location.origin).href; } catch (e) { /* 保留空 */ }
+      }
+      // 卡片文本里作者名/时间/统计都短，最长的一行几乎总是推文正文或文章标题
+      const lines = this._tweetPlainText(card).split('\n').map(s => s.trim()).filter(Boolean);
+      const label = (lines.sort((m, n) => n.length - m.length)[0] || '引用推文').slice(0, 60);
+      const p = document.createElement('p');
+      if (href) {
+        const a = document.createElement('a');
+        a.setAttribute('href', href);
+        a.textContent = `↗ 引用：${label}`;
+        p.appendChild(a);
+      } else {
+        p.textContent = `↗ 引用：${label}`;
+      }
+      section.replaceWith(p);
+    });
+
+    // 代码块：外壳带语言标签 div 与复制按钮，剥壳只留标准 <pre><code class="language-x">
+    container.querySelectorAll('[data-testid="markdown-code-block"]').forEach((block) => {
+      const pre = block.querySelector('pre');
+      const host = block.closest('section') || block;
+      if (pre) host.replaceWith(pre);
+      else host.remove();
+    });
+
+    // 配图 + 说明 → figure/figcaption（caption 是嵌套的 longform 小组件）
+    container.querySelectorAll('section').forEach((sec) => {
+      const img = sec.querySelector('[data-testid="tweetPhoto"] img[src]');
+      if (!img) return;
+      const fig = document.createElement('figure');
+      const ni = document.createElement('img');
+      ni.setAttribute('src', img.getAttribute('src'));
+      fig.appendChild(ni);
+      const cap = sec.querySelector('.twitter-article-media-caption-id');
+      const capText = cap ? cap.textContent.trim() : '';
+      if (capText) {
+        const fc = document.createElement('figcaption');
+        fc.textContent = capText;
+        fig.appendChild(fc);
+      }
+      sec.replaceWith(fig);
+    });
+
+    // 标题标签内部是 DraftJS 的块级 div 套 span，Turndown 会把 `##` 与文本
+    // 拆成两行——压平成纯文本
+    container.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
+      h.textContent = h.textContent.trim();
+    });
+
+    // DraftJS 粗体是 inline style（与公众号新版编辑器同款问题）→ 语义化
+    container.querySelectorAll('span[style]').forEach((sp) => {
+      const fw = sp.style && sp.style.fontWeight;
+      const bold = fw === 'bold' || fw === 'bolder' || parseInt(fw, 10) >= 600;
+      if (!bold || !sp.textContent.trim() || sp.closest('strong, b, h1, h2, h3, h4, h5, h6')) return;
+      const strong = document.createElement('strong');
+      sp.replaceWith(strong);
+      strong.appendChild(sp);
+    });
+
+    // 图片缩略参数升级为原图
+    container.querySelectorAll('img[src*="name="]').forEach((img) => {
+      img.setAttribute('src', img.getAttribute('src').replace(/name=\w+/, 'name=large'));
+    });
+    InkIR.normalizeContainer(container);
+
+    // 头卡（Article 卡片无 tweetText，只有封面+标题）提供作者/时间
+    const headCard = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
+      .find(a => !a.closest('[data-testid="longformRichTextComponent"]'));
+    const head = headCard ? this._parseTweet(headCard) : { author: '', handle: '', time: null };
+
+    // 回复：时间线卡片中有正文的（头卡无 text）、非广告、非本文自身
+    const pageId = (location.pathname.match(/\/status\/(\d+)/) || [])[1] || null;
+    const tweets = full ? await this._harvestTweets() : this._collectLoadedTweets();
+    const replies = tweets.filter(t => t.text && !t.isAd && (!pageId || t.statusId !== pageId));
+
+    const warnings = [];
+    if (replies.length) {
+      warnings.push(full
+        ? `已收集 ${replies.length} 条回复；X 按需分页加载，长对话可先手动滚动到底部再导出。`
+        : `当前已加载 ${replies.length} 条回复，导出时会自动滚动收集更多。`);
+    }
+
+    const ir = InkIR.create({
+      title: this._articleTitle(),
+      byline: [head.author, head.handle].filter(Boolean).join(' '),
+      siteName: 'X (Twitter)',
+      publishedTime: head.time,
+      contentEl: container,
+      warnings,
+    });
+    if (opts.includeComments !== false) {
+      ir.annotations = replies.map(t => InkIR.annotation({
+        kind: 'page',
+        author: [t.author, t.handle].filter(Boolean).join(' '),
+        time: t.time,
+        content: t.text + (t.photos.length ? `（含 ${t.photos.length} 图）` : ''),
+      }));
+    }
+    if (opts.analyzeOnly) ir._lite = true;
+    return ir;
+  },
+
+  /** Article 标题：document.title 的『作者 on X: "标题"』形态最可靠（可含未读计数前缀） */
+  _articleTitle() {
+    const m = document.title.match(/on X:\s*[“"](.+)[”"]/);
+    if (m) return m[1].trim();
+    return InkIR.pickTitle(null, /\s*[\/|]\s*X\s*$/).replace(/^\(\d+\)\s*/, '');
+  },
+
+  /** 只解析当前 DOM 已加载的推文（零滚动，分析阶段专用）。
+   *  排除 longform 正文内嵌的引用卡片——它们不是时间线里的回复。 */
   _collectLoadedTweets(byKey) {
     const map = byKey || new Map();
     document.querySelectorAll('article[data-testid="tweet"]').forEach((el) => {
+      if (el.closest('[data-testid="longformRichTextComponent"]')) return;
       const t = this._parseTweet(el);
       const key = t.statusId || t.text.slice(0, 80);
       if (key && !map.has(key)) map.set(key, t);

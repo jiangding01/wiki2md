@@ -1370,6 +1370,49 @@ async function runPipeline(page, fixture, options) {
     assert(x.liteWarn, '轻量分析的告警提示「导出时收集更多」');
   }
 
+  /* ---------- 用例 25：X Article（长文）模式（2026-07 用户实测 DOM） ---------- */
+  console.log('\n[25] XAdapter · Article 长文（DraftJS 正文 / 代码块剥壳 / 嵌入卡占位）');
+  {
+    const pageA = await browser.newPage();
+    await pageA.goto('file://' + path.join(ROOT, 'test/fixtures', 'x-article.html'));
+    for (const f of CONTENT_FILES) {
+      await pageA.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const a = await pageA.evaluate(async () => {
+      const ir = await XAdapter.extract({ includeComments: true });
+      const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: true });
+      return {
+        md,
+        title: ir.title,
+        byline: ir.byline,
+        publishedTime: ir.publishedTime,
+        annotations: ir.annotations.map(x => ({ author: x.author, content: x.content })),
+      };
+    });
+    await pageA.close();
+    assert(a.title === 'Cloudflare Worker + 域名：零成本搭建私人爬虫代理池',
+      'Article 标题从 document.title 的引号形态提取（剥未读计数前缀）', a.title);
+    assert(a.byline === '烁皓 @eternityspring' && a.publishedTime === '2026-07-14T08:00:00.000Z',
+      '作者/时间取自 Article 头卡（无 tweetText 的卡片）');
+    assert(a.md.includes('Cloudflare Worker 的免费额度是每天 10 万次请求') &&
+           a.md.includes('## Worker 为什么能做代理'),
+      'DraftJS 长文正文：段落与 h2 标题', a.md.slice(0, 150));
+    assert(/-\s+Cloudflare 账号（免费）/.test(a.md), '无序列表保留');
+    assert(/```javascript\nconst UA = "Mozilla\/5\.0";/.test(a.md) &&
+           !a.md.includes('Copy to clipboard'),
+      '代码块剥壳：语言标注保留、复制按钮外壳剔除', a.md.split('\n').find(l => l.includes('```')));
+    assert(a.md.includes('![创建 Worker](https://pbs.twimg.com/media/HE_Z3ENbAAAiUCK?format=jpg&name=large)') &&
+           a.md.includes('*创建 Worker*'),
+      '配图升级原图 + caption 转说明文字', a.md.split('\n').filter(l => l.includes('创建 Worker')).join(' | '));
+    assert(a.md.includes('[↗ 引用：Cloudflare Pages + CDN + 域名') &&
+           a.md.includes('/status/8001'),
+      '嵌入推文卡片 → 引用链接占位（不灌入卡片 UI 噪音）');
+    assert(a.md.includes('**获取内容**'), 'DraftJS inline style 粗体语义化');
+    assert(a.annotations.length === 1 && a.annotations[0].author === 'huang @horizon0627' &&
+           a.md.includes('## 💬 评论') && a.md.includes('公众号图片看不到哎'),
+      '时间线回复进评论区；头卡与嵌入卡不误入', JSON.stringify(a.annotations));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------

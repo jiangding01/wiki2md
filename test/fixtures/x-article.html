@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>(1) 烁皓 on X: "Cloudflare Worker + 域名：零成本搭建私人爬虫代理池" / X</title></head>
+<body>
+<!-- 仿真 X Article（长文）页：头卡无 tweetText，正文在 DraftJS longform 组件 -->
+<main>
+  <!-- Article 头卡：只有作者/时间/封面，无 tweetText -->
+  <article data-testid="tweet">
+    <div data-testid="User-Name">
+      <span>烁皓</span><span>@eternityspring</span><span>·</span>
+    </div>
+    <a href="/eternityspring/status/9001"><time datetime="2026-07-14T08:00:00.000Z">Jul 14</time></a>
+    <div data-testid="article-cover-image"><img src="https://pbs.twimg.com/media/COVER?format=jpg&amp;name=medium" alt="Article cover image"></div>
+  </article>
+
+  <!-- 正文：DraftJS longform -->
+  <div data-testid="longformRichTextComponent">
+    <div data-contents="true">
+      <div class="longform-unstyled" data-block="true"><div><span><span data-text="true">Cloudflare Worker 的免费额度是每天 10 万次请求，全球 300+ 边缘节点。</span></span></div></div>
+      <div dir="ltr"><h2 class="longform-header-two" data-block="true"><div><span><span data-text="true">Worker 为什么能做代理</span></span></div></h2></div>
+      <div class="longform-unstyled" data-block="true"><div><span><span data-text="true">发一个请求给 Worker，目标网站看到的是边缘节点 IP。</span></span></div></div>
+      <ul class="public-DraftStyleDefault-ul">
+        <li class="longform-unordered-list-item" data-block="true"><div><span><span data-text="true">Cloudflare 账号（免费）</span></span></div></li>
+        <li class="longform-unordered-list-item" data-block="true"><div><span><span data-text="true">一个域名</span></span></div></li>
+      </ul>
+      <!-- 嵌入的引用推文卡片 -->
+      <section data-block="true" contenteditable="false">
+        <div data-testid="simpleTweet">
+          <article role="article" data-testid="tweet">
+            <div data-testid="User-Name"><span>烁皓</span><span>@eternityspring</span></div>
+            <a href="/eternityspring/status/8001"><time datetime="2026-03-30T12:42:18.000Z">Mar 30</time></a>
+            <div><span>Cloudflare Pages + CDN + 域名：一分钱不花，拥有一个全球都能访问的在线简历</span></div>
+          </article>
+        </div>
+      </section>
+      <!-- 代码块（带语言标签与复制按钮外壳） -->
+      <section data-block="true" contenteditable="false">
+        <div data-testid="markdown-code-block">
+          <div><div dir="ltr">javascript</div><div><button aria-label="Copy to clipboard" type="button">copy</button></div></div>
+          <pre><code class="language-javascript"><span>const UA = "Mozilla/5.0";</span>
+<span>export default { async fetch(request, env) { return new Response("ok"); } };</span></code></pre>
+        </div>
+      </section>
+      <div class="longform-unstyled" data-block="true"><div><span><span data-text="true">点击右侧预览 tab 下的刷新按钮。</span></span></div></div>
+      <!-- 配图 + caption（caption 是嵌套 longform 小组件） -->
+      <section data-block="true" contenteditable="false">
+        <div>
+          <a href="/eternityspring/article/9001/media/7001">
+            <div aria-label="Image" data-testid="tweetPhoto">
+              <img alt="Image" src="https://pbs.twimg.com/media/HE_Z3ENbAAAiUCK?format=jpg&amp;name=medium">
+            </div>
+          </a>
+        </div>
+        <div id="caption-9001"><div class="twitter-article-media-caption-id">
+          <div data-testid="longformRichTextComponent"><div data-contents="true">
+            <div class="longform-unstyled" data-block="true"><div><span><span data-text="true">创建 Worker</span></span></div></div>
+          </div></div>
+        </div></div>
+      </section>
+      <!-- DraftJS 粗体 inline style -->
+      <ol class="public-DraftStyleDefault-ol">
+        <li class="longform-ordered-list-item" data-block="true"><div><span style="font-weight: bold;"><span data-text="true">获取内容</span></span><span><span data-text="true">：通过 Worker 代理爬取网页 HTML。</span></span></div></li>
+      </ol>
+      <div class="longform-unstyled" data-block="true"><div><span><span data-text="true">本文首发于微信公众号：「阿皓AI」，欢迎关注！</span></span></div></div>
+    </div>
+  </div>
+
+  <!-- 时间线回复 -->
+  <div data-testid="cellInnerDiv">
+    <article role="article" data-testid="tweet">
+      <div data-testid="User-Name">
+        <span>huang</span><span>@horizon0627</span><span>·</span>
+      </div>
+      <a href="/horizon0627/status/9101"><time datetime="2026-07-15T14:32:55.000Z">Jul 15</time></a>
+      <div data-testid="tweetText"><span>公众号图片看不到哎，都是占位图</span></div>
+    </article>
+  </div>
+</main>
+</body>
+</html>
