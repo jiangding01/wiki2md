@@ -531,10 +531,25 @@
   window.__inkmark = {
     getIR, handleAnalyze, handleExport, handleExportSelection,
     handleExportTree, handleTreeStatus, loadSettings, __treeConfig: treeConfig,
+    shouldHandleMessage,
   };
+
+  /**
+   * 广播守卫（纯函数，供测试）：不带 frameId 的 tabs.sendMessage 会同时
+   * 投递到所有 frame，allFrames 注入后每个 frame 都有监听器——若子 frame
+   * 也执行导出，一次点击产生多份下载（真实 bug：飞书页面双 ZIP）。
+   * 规则：子 frame 只处理显式定向给自己的消息（options.frameTargeted，
+   * 由 popup 选优等合法路径携带）；顶层不受限。被忽略的消息不回包，
+   * 把响应让给顶层 frame。
+   */
+  function shouldHandleMessage(msg, isTopFrame) {
+    if (isTopFrame) return true;
+    return !!(msg && msg.options && msg.options.frameTargeted);
+  }
 
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!shouldHandleMessage(msg, window === window.top)) return;
     const run = async () => {
       try {
         if (msg.type === 'INK_ANALYZE') return await handleAnalyze(msg.options);

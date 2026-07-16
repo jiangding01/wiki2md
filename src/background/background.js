@@ -120,11 +120,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (info.menuItemId === 'ink-export-selection') {
       // 选区可能在子 frame 里——定向发往用户实际右键的那个 frame，
       // 否则顶层拿不到子 frame 的 selection，导出「没有选中内容」。
+      // 子 frame 需带 frameTargeted 通过页面侧广播守卫。
+      const frameId = info.frameId || 0;
       res = await chrome.tabs.sendMessage(
-        tab.id, { type: 'INK_EXPORT_SELECTION', options: {} },
-        info.frameId != null ? { frameId: info.frameId } : undefined);
+        tab.id,
+        { type: 'INK_EXPORT_SELECTION', options: frameId ? { frameTargeted: true } : {} },
+        { frameId });
     } else {
-      res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: await getExportAction(), options: {} });
+      // frameId 必须显式（顶层=0）：allFrames 注入后不带 frameId 是广播，
+      // 页面里的子 frame 会各自再导出一份（真实 bug：飞书页面双 ZIP）
+      res = await chrome.tabs.sendMessage(tab.id,
+        { type: 'INK_EXPORT', action: await getExportAction(), options: {} }, { frameId: 0 });
     }
     await flashBadge(tab.id, !!(res && res.ok));
   } catch (e) {
@@ -141,7 +147,9 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (!tab || !tab.id) return;
   try {
     await injectPipeline(tab.id);
-    const res = await chrome.tabs.sendMessage(tab.id, { type: 'INK_EXPORT', action: await getExportAction(), options: {} });
+    // 显式定向顶层，避免 allFrames 广播导致多 frame 重复导出
+    const res = await chrome.tabs.sendMessage(tab.id,
+      { type: 'INK_EXPORT', action: await getExportAction(), options: {} }, { frameId: 0 });
     await flashBadge(tab.id, !!(res && res.ok));
   } catch (e) {
     console.warn('[inkmark] shortcut export failed:', e);

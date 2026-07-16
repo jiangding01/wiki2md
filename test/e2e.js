@@ -1298,10 +1298,26 @@ async function runPipeline(page, fixture, options) {
       await rec('节选A', 'selection');   // 节选同名：不去重
       return store.inkmarkHistory.map(e => `${e.title}:${e.action}`);
     });
-    await pageH.close();
     assert(JSON.stringify(h) ===
            JSON.stringify(['节选A:selection', '节选A:selection', '文档B:download', '文档A:copy']),
       '同文档重复导出只留最新；不同标题与节选均保留', JSON.stringify(h));
+
+    /* ---- 用例 23：消息广播守卫（allFrames 注入后子 frame 不响应广播导出） ---- */
+    console.log('\n[23] 广播守卫 · 子 frame 只处理显式定向消息');
+    const g = await pageH.evaluate(() => {
+      const f = window.__inkmark.shouldHandleMessage;
+      return {
+        topAny: f({ type: 'INK_EXPORT', options: {} }, true),
+        subBroadcast: f({ type: 'INK_EXPORT', options: {} }, false),
+        subNoOptions: f({ type: 'INK_EXPORT' }, false),
+        subTargeted: f({ type: 'INK_EXPORT', options: { frameTargeted: true } }, false),
+      };
+    });
+    await pageH.close();
+    assert(g.topAny === true, '顶层 frame 处理一切消息');
+    assert(g.subBroadcast === false && g.subNoOptions === false,
+      '子 frame 忽略广播消息（一次点击不再产生多份下载）', JSON.stringify(g));
+    assert(g.subTargeted === true, '显式定向（frameTargeted）的子 frame 消息正常处理');
   }
 
   await browser.close();

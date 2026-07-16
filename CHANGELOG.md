@@ -14,6 +14,13 @@
 
 ### 修复
 
+- **一次导出触发多份下载**（用户实测反馈：飞书页面双 ZIP）：1.3.0 的
+  allFrames 注入让每个 frame 都装上了消息监听器，而不带 frameId 的
+  `tabs.sendMessage` 是广播——含子 frame 的页面（飞书等）一次点击会让
+  顶层与子 frame 各自导出。修复分两层：所有导出/分析消息显式定向
+  （顶层 frameId 0；popup 选优与右键选区定向到目标 frame 并带
+  frameTargeted 标志）；页面侧新增广播守卫，子 frame 只处理显式定向
+  给自己的消息——将来新增调用点忘带 frameId 也不会再重复下载
 - **微信公众号新版编辑器适配**（用户实测 DOM 驱动）：
   - 图片改用 `data-src` 原图——页面 JS 会把 `src` 填成 `tp=webp&wx_lazy=1`
     的懒加载低清版，此前导出的正是这个必裂版本；同时标记 `authImages`

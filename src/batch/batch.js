@@ -151,7 +151,8 @@ async function exportSelected() {
       // 先分析定文件名（提取结果有缓存，导出时不会重跑）——
       // 图片要落在 assets/<md 同名目录>/，页面侧抓图前必须先知道最终唯一名，
       // 事后改名就得回头替换 md 里的引用路径
-      const ana = await chrome.tabs.sendMessage(tab.id, { type: 'INK_ANALYZE', options: {} });
+      // 显式定向顶层（frameId 0）：allFrames 广播会让子 frame 抢答/重复导出
+      const ana = await chrome.tabs.sendMessage(tab.id, { type: 'INK_ANALYZE', options: {} }, { frameId: 0 });
       if (!ana || !ana.ok) throw new Error((ana && ana.error) || '分析失败');
       // 与页面侧同一实现（buildFilename）算名，规则不漂移
       const name = InkExporter
@@ -166,7 +167,7 @@ async function exportSelected() {
         type: 'INK_EXPORT',
         action: localize ? 'localized' : 'markdown',
         options: { intent: 'batch', assetDir: `assets/${unique}` },
-      });
+      }, { frameId: 0 });
       if (!res || !res.ok) throw new Error((res && res.error) || '提取失败');
 
       zip.file(`${unique}.md`, res.markdown);
