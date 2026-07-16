@@ -72,7 +72,7 @@
 
 ```bash
 npm install playwright          # 测试依赖（仅本地）
-node test/e2e.js                # 真实 Chromium 中跑全管线断言（187 项）
+node test/e2e.js                # 真实 Chromium 中跑全管线断言（190 项）
 # 使用系统已有浏览器：CHROMIUM_PATH=/path/to/chrome node test/e2e.js
 ```
 

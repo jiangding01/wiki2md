@@ -101,10 +101,18 @@ async function persistPrefs(partial) {
 
 /**
  * 向选中的正文 frame 发消息，注入尚未就绪时自动重试一次。
- * state.frameId 为 null（顶层）时不带 frameId 选项——与历史行为逐字节一致。
+ * frameId 必须显式指定（顶层=0）：allFrames 注入后每个 frame 都有监听器，
+ * 不带 frameId 的 tabs.sendMessage 是广播——所有 frame 都会执行导出，
+ * 一次点击产生多份下载（真实 bug：飞书页面双 ZIP）。
+ * 定向到子 frame 时带 frameTargeted 标志，通过页面侧的广播守卫。
  */
 async function sendToPage(payload) {
-  const opts = state.frameId != null ? { frameId: state.frameId } : undefined;
+  const opts = { frameId: state.frameId != null ? state.frameId : 0 };
+  if (state.frameId != null && state.frameId !== 0) {
+    payload = Object.assign({}, payload, {
+      options: Object.assign({}, payload.options, { frameTargeted: true }),
+    });
+  }
   try {
     return await chrome.tabs.sendMessage(state.tabId, payload, opts);
   } catch (e) {
@@ -191,7 +199,10 @@ async function analyzeSelectFrame(options) {
     const base = { frameId: f.frameId, isTop: f.frameId === 0, ok: false };
     try {
       const r = await chrome.tabs.sendMessage(
-        state.tabId, { type: 'INK_ANALYZE', options }, { frameId: f.frameId });
+        state.tabId,
+        // 定向到子 frame 需带 frameTargeted，否则被页面侧广播守卫忽略
+        { type: 'INK_ANALYZE', options: f.frameId === 0 ? options : Object.assign({}, options, { frameTargeted: true }) },
+        { frameId: f.frameId });
       if (!r || !r.ok) return Object.assign(base, { res: r });
       return {
         frameId: f.frameId, isTop: f.frameId === 0, ok: true,
