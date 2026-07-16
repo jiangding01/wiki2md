@@ -1379,10 +1379,13 @@ async function runPipeline(page, fixture, options) {
       await pageA.addScriptTag({ path: path.join(ROOT, f) });
     }
     const a = await pageA.evaluate(async () => {
+      const matchArticleUrl = XAdapter.match(
+        { hostname: 'x.com', pathname: '/eternityspring/article/9001' });
       const ir = await XAdapter.extract({ includeComments: true });
       const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: true });
       return {
         md,
+        matchArticleUrl,
         title: ir.title,
         byline: ir.byline,
         publishedTime: ir.publishedTime,
@@ -1390,6 +1393,7 @@ async function runPipeline(page, fixture, options) {
       };
     });
     await pageA.close();
+    assert(a.matchArticleUrl, '/article/<id> 形态的 URL 同样命中适配器');
     assert(a.title === 'Cloudflare Worker + 域名：零成本搭建私人爬虫代理池',
       'Article 标题从 document.title 的引号形态提取（剥未读计数前缀）', a.title);
     assert(a.byline === '烁皓 @eternityspring' && a.publishedTime === '2026-07-14T08:00:00.000Z',

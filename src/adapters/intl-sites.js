@@ -84,8 +84,10 @@ var XAdapter = window.XAdapter || {
   badge: 'experimental', // DOM 结构随平台版本波动，真机验证后再升精配
 
   match(loc) {
+    // /status/<id>：普通推文与带评论的长文详情页；/article/<id>：纯文章页。
+    // 两种页面靠 DOM 特征分流（有 longform 组件即 Article 模式），与 URL 无关
     return /(\.|^)(x\.com|twitter\.com)$/.test(loc.hostname) &&
-      /\/status\/\d+/.test(loc.pathname);
+      /\/(status|article)\/\d+/.test(loc.pathname);
   },
 
   async extract(options) {
