@@ -1457,6 +1457,24 @@ async function runPipeline(page, fixture, options) {
     assert(t.nested.includes('<table><tbody>') && !t.nested.includes('outer') &&
            !t.nested.includes('color:red') && !t.nested.includes('data-z'),
       '嵌套表保留 HTML 但必经净化（keep 出口的纵深防御）', t.nested.slice(0, 120));
+    const h1 = await (async () => {
+      const pageH1 = await browser.newPage();
+      await pageH1.goto('file://' + path.join(ROOT, 'test/fixtures', 'generic-article.html'));
+      for (const f of CONTENT_FILES) {
+        await pageH1.addScriptTag({ path: path.join(ROOT, f) });
+      }
+      const md = await pageH1.evaluate(() => {
+        const c = document.createElement('div');
+        c.innerHTML = '<p>正文</p>';
+        return InkMarkdown.render(
+          InkIR.create({ title: '标题主体\n              - PRD', contentEl: c }),
+          { frontMatter: false, includeComments: false });
+      });
+      await pageH1.close();
+      return md;
+    })();
+    assert(h1.startsWith('# 标题主体 - PRD'),
+      'H1 标题内部换行压平（断行会让第二行变成正文列表项）', h1.split('\n')[0]);
   }
 
   await browser.close();

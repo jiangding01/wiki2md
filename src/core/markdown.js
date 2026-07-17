@@ -632,7 +632,9 @@ var InkMarkdown = window.InkMarkdown || {
 
     const pieces = [];
     if (opts.frontMatter) pieces.push(this.buildFrontMatter(ir, opts));
-    if (opts.includeTitle) pieces.push(`# ${ir.title}`);
+    // 标题内部空白压平：源页标题元素可能含换行缩进，H1 断行后
+    // 第二行会被渲染器当成正文（如「- PRD」变列表项）
+    if (opts.includeTitle) pieces.push(`# ${String(ir.title).replace(/\s+/g, ' ').trim()}`);
     pieces.push(body);
     if (appendixAnns.length) {
       pieces.push(this.buildCommentAppendix(appendixAnns));
