@@ -21,6 +21,13 @@ var InkMarkdown = window.InkMarkdown || {
       strongDelimiter: (s.mdEmphasis || '*') === '_' ? '__' : '**',
       linkStyle: s.mdLinkStyle || 'inlined',
       linkReferenceStyle: 'full',
+      // 纵深防御：gfm 插件会把它认不出表头的表格整表 keep——被 keep 的
+      // TABLE 一律过同款净化再输出，「未净化 HTML」这个出口彻底封死
+      // （站点 class/style/data-* 噪音与 XSS 面都不再漏出）
+      keepReplacement: (content, node) =>
+        node.nodeName === 'TABLE'
+          ? '\n\n' + InkMarkdown._sanitizedTableHtml(node) + '\n\n'
+          : (node.isBlock ? '\n\n' + node.outerHTML + '\n\n' : node.outerHTML),
     });
     td.use(turndownPluginGfm.gfm);
 
@@ -101,23 +108,8 @@ var InkMarkdown = window.InkMarkdown || {
     // 复杂表格（prepareTables 标记）：净化后整表输出 HTML，结构零丢失
     td.addRule('complexTableAsHtml', {
       filter: (node) => node.nodeName === 'TABLE' && node.hasAttribute('data-ink-keep-html'),
-      replacement: (content, node) => {
-        const clone = node.cloneNode(true);
-        clone.removeAttribute('data-ink-keep-html');
-        // 只保留结构与内容必需的属性，剥掉站点的 class/style/id 噪音
-        const KEEP_ATTRS = ['rowspan', 'colspan', 'align', 'src', 'alt', 'href'];
-        [clone, ...clone.querySelectorAll('*')].forEach((el) => {
-          Array.from(el.attributes).forEach((attr) => {
-            if (!KEEP_ATTRS.includes(attr.name)) {
-              el.removeAttribute(attr.name);
-            } else if ((attr.name === 'href' || attr.name === 'src') &&
-                       /^\s*(javascript|vbscript|data\s*:\s*text)/i.test(attr.value)) {
-              el.removeAttribute(attr.name); // 危险协议不进导出文件
-            }
-          });
-        });
-        return '\n\n' + clone.outerHTML.replace(/>\s+</g, '><') + '\n\n';
-      },
+      replacement: (content, node) =>
+        '\n\n' + InkMarkdown._sanitizedTableHtml(node) + '\n\n',
     });
 
     // GFM 单元格：内容里的 | 全部转义为 \|。
@@ -191,6 +183,26 @@ var InkMarkdown = window.InkMarkdown || {
    *    默认整表保留为净化后的 HTML（GFM、Obsidian、Typora 都原生渲染
    *    HTML 表格），结构零丢失；用户也可在设置里选择「强制扁平化」。
    */
+
+  /** 表格 HTML 净化（complexTableAsHtml 与 keepReplacement 共用唯一实现）：
+   *  只保留结构与内容必需的属性，剥掉站点的 class/style/data-* 噪音，
+   *  href/src 的危险协议不进导出文件。 */
+  _sanitizedTableHtml(node) {
+    const clone = node.cloneNode(true);
+    clone.removeAttribute('data-ink-keep-html');
+    const KEEP_ATTRS = ['rowspan', 'colspan', 'align', 'src', 'alt', 'href'];
+    [clone, ...clone.querySelectorAll('*')].forEach((el) => {
+      Array.from(el.attributes).forEach((attr) => {
+        if (!KEEP_ATTRS.includes(attr.name)) {
+          el.removeAttribute(attr.name);
+        } else if ((attr.name === 'href' || attr.name === 'src') &&
+                   /^\s*(javascript|vbscript|data\s*:\s*text)/i.test(attr.value)) {
+          el.removeAttribute(attr.name); // 危险协议不进导出文件
+        }
+      });
+    });
+    return clone.outerHTML.replace(/>\s+</g, '><');
+  },
 
   /** 表格结构是否超出 GFM 的表达能力（无表头可通过表头提升修复，不算复杂） */
   isComplexTable(table) {
@@ -282,10 +294,17 @@ var InkMarkdown = window.InkMarkdown || {
         if (this._hasSpannedCells(table)) this.normalizeTableGrid(table);
       });
     }
-    // 表头提升：GFM 表格必须有表头行。对将转 GFM 的无表头表格，把首行 td 提升为 th。
-    // 否则 gfm 插件会把整表原样 keep 成未净化的 HTML——既丢转换又留下 XSS 面。
+    // 表头规范化：GFM 表格必须有插件「认得出」的表头行，否则整表被原样
+    // keep 成未净化 HTML——既丢转换又留下噪音与 XSS 面。三步：
+    // 1. 删 colgroup/col：对 md 无意义，且它排在 tbody 前面会让 gfm 插件的
+    //    isFirstTbody 判定失败（tbody 的前兄弟不是空 thead）——Confluence
+    //    表格自带列宽 colgroup，真实案例里规则表格因此整表漏净化；
+    // 2. 无表头的把首行 td 提升为 th；
+    // 3. 首行全 th 时显式包进 <thead>：命中插件判表头的 THEAD 分支，
+    //    不再依赖「tbody 必须是第一个孩子」这类脆弱的结构位置判定。
     root.querySelectorAll('table').forEach((table) => {
       if (table.closest('[data-ink-keep-html]')) return;
+      table.querySelectorAll('colgroup, col').forEach(n => n.remove());
       const first = table.querySelector('tr');
       if (!first) return;
       Array.from(first.children).forEach((c) => {
@@ -295,6 +314,12 @@ var InkMarkdown = window.InkMarkdown || {
           c.replaceWith(th);
         }
       });
+      if (first.parentElement && first.parentElement.tagName !== 'THEAD' &&
+          Array.from(first.children).every(c => c.tagName === 'TH')) {
+        const thead = document.createElement('thead');
+        table.insertBefore(thead, table.firstChild);
+        thead.appendChild(first);
+      }
     });
     this.flattenTableCells(root);
   },

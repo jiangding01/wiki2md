@@ -1420,6 +1420,45 @@ async function runPipeline(page, fixture, options) {
       '时间线回复进评论区；头卡与嵌入卡不误入', JSON.stringify(a.annotations));
   }
 
+  /* ---------- 用例 26：colgroup 表格与 keep 净化（2026-07 用户实测 Confluence 导出） ---------- */
+  console.log('\n[26] 表格 · colgroup 不再触发整表 keep / 被 keep 的表格必净化');
+  {
+    const pageT = await browser.newPage();
+    await pageT.goto('file://' + path.join(ROOT, 'test/fixtures', 'generic-article.html'));
+    for (const f of CONTENT_FILES) {
+      await pageT.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const t = await pageT.evaluate(() => {
+      const mk = (html) => {
+        const c = document.createElement('div');
+        c.innerHTML = html;
+        return InkMarkdown.render(InkIR.create({ title: 't', contentEl: c }),
+          { frontMatter: false, includeComments: false, includeTitle: false });
+      };
+      return {
+        // Confluence 真实形态：colgroup 挡在 tbody 前，gfm 插件因此认不出表头
+        colgroup: mk('<table class="confluenceTable" style="width:77%"><colgroup><col style="width:11%"></colgroup>' +
+          '<tbody><tr><th class="h"><strong>时刻</strong></th><th>逻辑</th></tr>' +
+          '<tr><td colspan="1" rowspan="1" class="d">场景1<br>' +
+          '<img src="https://x.com/a.png" data-image-src="/dl/a.png" class="t"></td><td>说明</td></tr></tbody></table>'),
+        // 嵌套表走 keep-html 直通：输出必须是净化后的（无 class/style/data-*）
+        nested: mk('<table class="outer" style="color:red"><tbody><tr><td data-z="1">外' +
+          '<table class="inner"><tbody><tr><td>内</td></tr></tbody></table></td></tr></tbody></table>'),
+      };
+    });
+    await pageT.close();
+    assert(t.colgroup.includes('| **时刻** | 逻辑 |') && t.colgroup.includes('| --- | --- |'),
+      '带 colgroup 的规则表格转 GFM（此前整表被原样 keep）', t.colgroup.slice(0, 120));
+    assert(!t.colgroup.includes('<table') && !t.colgroup.includes('confluenceTable') &&
+           !t.colgroup.includes('data-image-src'),
+      '不再输出未净化的表格 HTML（class/style/data-* 噪音消失）');
+    assert(t.colgroup.includes('![](https://x.com/a.png)'),
+      '单元格内图片转 md 形式（可被图片本地化收集）');
+    assert(t.nested.includes('<table><tbody>') && !t.nested.includes('outer') &&
+           !t.nested.includes('color:red') && !t.nested.includes('data-z'),
+      '嵌套表保留 HTML 但必经净化（keep 出口的纵深防御）', t.nested.slice(0, 120));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------

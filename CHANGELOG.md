@@ -27,6 +27,16 @@
 
 ### 修复
 
+- **Confluence 表格整表漏净化**（用户实测导出驱动）：Confluence 表格自带
+  `<colgroup>` 列宽定义、排在 tbody 之前，gfm 插件的表头判定因此失败，
+  规则表格被整表原样 keep——输出满是 class/style/data-image-src 噪音的
+  未净化 HTML（表格内图片其实已本地化，但脏属性里的远程地址造成
+  「图片没本地化」的观感），也留下了本应封死的 XSS 面。三层修复：
+  预处理删除 colgroup/col（对 md 无意义）；首行全 th 时显式包进
+  `<thead>`（命中插件最稳的判定分支）；`keepReplacement` 纵深防御——
+  任何被 keep 的表格一律过净化再输出，「未净化 HTML」出口彻底封死。
+  受益面：此前被误 keep 的规则表格现在转为干净的 GFM 表格，
+  单元格内图片转 md 形式、可被图片本地化正常收集
 - **一次导出触发多份下载**（用户实测反馈：飞书页面双 ZIP）：1.3.0 的
   allFrames 注入让每个 frame 都装上了消息监听器，而不带 frameId 的
   `tabs.sendMessage` 是广播——含子 frame 的页面（飞书等）一次点击会让
