@@ -38,6 +38,16 @@ body {
   font-size: 16px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 预览质量提示条（图片超预算降级 / 部分失败 / 刷新后内嵌图释放） */
+.preview-notice {
+  padding: 8px 22px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  background: var(--amber-mist, rgba(214, 158, 46, .12));
+  border-bottom: 1px solid var(--paper-line);
+}
+
 .sub {
   display: block;
   font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono);

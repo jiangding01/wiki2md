@@ -16,7 +16,7 @@ cd wiki2md
 
 ```bash
 npm install playwright        # 仅测试需要，不进仓库（.gitignore 已排除）
-node test/e2e.js              # 真实 Chromium 中跑全管线断言（119 项）
+node test/e2e.js              # 真实 Chromium 中跑全管线断言（当前数量见 README）
 # 使用系统已有浏览器：
 CHROMIUM_PATH=/path/to/chrome node test/e2e.js
 ```

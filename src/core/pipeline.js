@@ -172,8 +172,10 @@
         (done, total) => progress(`抓取图片 ${done}/${total}…`),
         settings.assetDir || 'assets'
       );
-      if (settings.keepHistory) {
-        // 历史记录存未本地化的 markdown——脱离 ZIP 的 assets 相对路径没有意义
+      if (settings.keepHistory && settings.intent === 'batch') {
+        // 只有批量导出记入历史（预览也走本通道，但预览从不落历史——
+        // 与 markdown 动作的行为对齐）；存未本地化的 markdown，
+        // 脱离 ZIP 的 assets 相对路径没有意义
         await InkExporter.recordHistory(ir, markdown, filename, 'batch');
       }
       let totalBytes = 0;

@@ -247,6 +247,7 @@ function renderAnalysis(res) {
   $('doc-site').textContent = (res.siteName && res.siteName !== res.adapter.name) ? res.siteName : '';
 
   $('doc-title').value = res.title || '';
+  autoSizeTitle();
   $('stat-words').textContent = formatNum(res.stats.words);
   $('stat-images').textContent = res.stats.images;
   $('stat-tables').textContent = res.stats.tables;
@@ -298,6 +299,14 @@ function showError(msg, hint) {
   $('state-error').classList.remove('hidden');
   $('error-message').textContent = msg;
   if (hint) document.querySelector('.error-hint').textContent = hint;
+}
+
+/** 标题框高度自适应内容（1~3 行，上限由 CSS max-height 收口） */
+function autoSizeTitle() {
+  const el = $('doc-title');
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
 }
 
 function formatNum(n) {
@@ -374,12 +383,28 @@ async function doPreview() {
   state.localAction = true;
   setBusy(true);
   try {
+    // 预览遵循图片策略：「本地打包」时走 localized 通道（页面内抓图带登录态、
+    // base64 随行）——扩展页没有源站登录态，远程链接在预览里必裂；
+    // 预览页据 images 内嵌显示图片、下载按钮产出与主面板一致的 ZIP
+    const wantLocal = state.imageStrategy === 'zip';
+    const options = exportOptions();
+    if (wantLocal) options.assetDir = 'assets';
     const res = await sendToPage({
-      type: 'INK_EXPORT', action: 'markdown', options: exportOptions(),
+      type: 'INK_EXPORT',
+      action: wantLocal ? 'localized' : 'markdown',
+      options,
     });
     if (!res.ok) throw new Error(res.error);
     await chrome.storage.local.set({
-      inkmarkPreview: { markdown: res.markdown, title: res.title, filename: res.filename, ts: Date.now() },
+      inkmarkPreview: {
+        markdown: res.markdown, title: res.title, filename: res.filename,
+        images: res.images || [],
+        // 降级信息必须透传：超预算/部分失败时预览页要向用户明示，
+        // 否则「选了本地打包却见到裂图」无从解释（批量导出有同款行内明示）
+        oversize: !!res.oversize,
+        imageFailed: res.imageFailed || 0,
+        ts: Date.now(),
+      },
     });
     await chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/preview.html') });
     window.close();
@@ -481,6 +506,8 @@ function bindEvents() {
       persistPrefs({ imageStrategy: state.imageStrategy });
     });
   });
+
+  $('doc-title').addEventListener('input', autoSizeTitle);
 
   $('opt-frontmatter').addEventListener('change', () => {
     persistPrefs({ frontMatter: $('opt-frontmatter').checked });

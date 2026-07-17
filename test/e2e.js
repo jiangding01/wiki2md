@@ -1477,6 +1477,51 @@ async function runPipeline(page, fixture, options) {
       'H1 标题内部换行压平（断行会让第二行变成正文列表项）', h1.split('\n')[0]);
   }
 
+  /* ---------- 用例 27：预览页内嵌图片映射（本地打包预览所见即所得） ---------- */
+  console.log('\n[27] 预览 · assets 引用映射为内存图（含转义路径/远程不动/缓存复用）');
+  {
+    const pageP = await browser.newPage();
+    await pageP.goto('file://' + path.join(ROOT, 'test/fixtures', 'generic-article.html'));
+    await pageP.addScriptTag({ path: path.join(ROOT, 'src/ui/shared.js') });
+    const p = await pageP.evaluate(() => {
+      const HTML =
+        '<img src="assets/img-001.png">' +
+        '<img src="assets/%E7%A4%BA%E4%BE%8B/img-002.png">' + // assets/示例/…（_mdPathEscape 转义形态）
+        '<img src="assets/bad.png">' + // base64 损坏的图
+        '<img src="https://x.com/remote.png">';
+      const images = [
+        { path: 'assets/img-001.png', base64: btoa('x') },
+        { path: 'assets/示例/img-002.png', base64: btoa('y') },
+        { path: 'assets/bad.png', base64: '%%%not-base64%%%' },
+      ];
+      const root = document.createElement('div');
+      root.innerHTML = HTML;
+      const cache = new Map();
+      const applied1 = InkUI.applyInlineImages(root, images, cache);
+      const srcs = Array.from(root.querySelectorAll('img')).map(i => i.getAttribute('src'));
+      // 模拟编辑后重渲染（innerHTML 重建，src 回到 assets 形态）：缓存应复用
+      root.innerHTML = HTML;
+      const applied2 = InkUI.applyInlineImages(root, images, cache);
+      const srcs2 = Array.from(root.querySelectorAll('img')).map(i => i.getAttribute('src'));
+      // 模拟编辑删掉 img-001 引用后的重渲染：对应 blob 应被回收出缓存
+      root.innerHTML = HTML.replace('<img src="assets/img-001.png">', '');
+      InkUI.applyInlineImages(root, images, cache);
+      return {
+        applied1, applied2, srcs,
+        reused: srcs2[0] === srcs[0] && srcs2[1] === srcs[1],
+        cacheAfterRemove: cache.size,
+      };
+    });
+    await pageP.close();
+    assert(p.applied1 === 2 && p.srcs[0].startsWith('blob:') && p.srcs[1].startsWith('blob:'),
+      'assets 引用（含 %XX 转义路径）替换为 blob URL', JSON.stringify(p.srcs));
+    assert(p.srcs[2] === 'assets/bad.png' && p.srcs[3] === 'https://x.com/remote.png',
+      'base64 损坏的图保留原引用不拖垮其余；远程链接不受影响');
+    assert(p.applied2 === 2 && p.reused, '重渲染复用缓存（blob URL 不重建）');
+    assert(p.cacheAfterRemove === 1, '删掉引用的图从缓存回收（revoke 不泄漏）',
+      String(p.cacheAfterRemove));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------

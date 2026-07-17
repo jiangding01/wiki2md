@@ -15,16 +15,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.body.dataset.view = 'split';
 
   if (IS_EXTENSION) {
-    // storage.local 只是 popup → 预览页的交接通道：读到后立刻转存本标签页的
-    // sessionStorage（刷新页面内容不丢）并从 local 删除——否则上次预览的
-    // 全文会一直躺在本机存储里（隐私考量，也符合 PRIVACY.md 的口径）
+    // storage.local 只是 popup → 预览页的交接通道：读到后立刻从 local 删除
+    // （隐私：全文与图片数据不长驻本机，PRIVACY.md 口径）——删除动作绝不
+    // 受后面转存成败牵连。轻量部分（markdown/标题等）转存 sessionStorage
+    // 供刷新恢复；base64 图片可达几十 MB，sessionStorage 5MB 配额放不下、
+    // 序列化本身也贵——只存内存，刷新后不保留（renderMarkdown 会给出提示）。
     const { inkmarkPreview } = await chrome.storage.local.get('inkmarkPreview');
     if (inkmarkPreview && inkmarkPreview.markdown) {
       current = inkmarkPreview;
+      chrome.storage.local.remove('inkmarkPreview');
       try {
-        sessionStorage.setItem('inkmarkPreview', JSON.stringify(inkmarkPreview));
-        chrome.storage.local.remove('inkmarkPreview');
-      } catch (e) { /* 超大文档超出 sessionStorage 配额：保留 local 以免刷新丢内容 */ }
+        const light = Object.assign({}, inkmarkPreview);
+        delete light.images;
+        sessionStorage.setItem('inkmarkPreview', JSON.stringify(light));
+      } catch (e) { /* 超配额等：放弃转存，刷新后回到空态 */ }
     } else {
       try {
         const stash = sessionStorage.getItem('inkmarkPreview');
@@ -130,12 +134,61 @@ document.addEventListener('DOMContentLoaded', async () => {
     requestAnimationFrame(() => { scrollLock = false; });
   }, { passive: true });
 
-  document.getElementById('btn-download').addEventListener('click', () => {
-    InkUI.downloadBlob(
-      new Blob([current.markdown], { type: 'text/markdown;charset=utf-8' }),
-      current.filename || 'untitled.md');
+  // 「本地打包」预览携带图片数据：下载按钮产出与主面板一致的 ZIP
+  //（md + assets/），否则拿到的 md 里全是 assets/ 死引用
+  const hasImages = !!(current.images && current.images.length);
+  const btnDownload = document.getElementById('btn-download');
+  if (hasImages) btnDownload.textContent = '下载 .zip';
+  btnDownload.addEventListener('click', async () => {
+    if (!hasImages) {
+      InkUI.downloadBlob(
+        new Blob([current.markdown], { type: 'text/markdown;charset=utf-8' }),
+        current.filename || 'untitled.md');
+      return;
+    }
+    // ZIP 生成是异步重活：忙态防连点，否则两次点击并发解码出双份 ZIP
+    if (btnDownload.disabled) return;
+    btnDownload.disabled = true;
+    const label = btnDownload.textContent;
+    btnDownload.textContent = '打包中…';
+    try {
+      // 目录布局须与 InkExporter.downloadZip 保持一致（<base>/index.md +
+      // <base>/assets/…）——两处运行环境隔离无法共用实现，改结构要同步改
+      const base = (current.filename || 'untitled.md').replace(/\.md$/, '');
+      const zip = new JSZip();
+      zip.file(`${base}/index.md`, current.markdown);
+      for (const img of current.images) {
+        try {
+          zip.file(`${base}/${img.path}`, InkUI.base64ToBlob(img.base64));
+        } catch (e) { /* 单图数据损坏：跳过，不拖垮整包 */ }
+      }
+      InkUI.downloadBlob(await zip.generateAsync({ type: 'blob' }), `${base}.zip`);
+    } finally {
+      btnDownload.disabled = false;
+      btnDownload.textContent = label;
+    }
   });
+
+  renderNotice();
 });
+
+/** 预览质量提示：图片超预算降级 / 部分抓取失败 / 刷新后内嵌图释放 */
+function renderNotice() {
+  const el = document.getElementById('preview-notice');
+  if (!el) return;
+  const notes = [];
+  if (current.oversize) {
+    notes.push('图片总量超出单次传输预算，本次预览为远程链接版（下载为 .md）；如需带图产物请在面板用「下载 ZIP」。');
+  } else if (current.imageFailed > 0) {
+    notes.push(`${current.imageFailed} 张图片抓取失败，已保留远程链接。`);
+  }
+  if (!current.oversize && !(current.images && current.images.length) &&
+      current.markdown && current.markdown.includes('](assets/')) {
+    notes.push('内嵌图片数据不随页面刷新保留，如需查看请从面板重新打开预览。');
+  }
+  el.textContent = notes.join(' ');
+  el.classList.toggle('hidden', notes.length === 0);
+}
 
 /**
  * DOM 级消毒：markdown 来自任意网页，可能携带原始 HTML（复杂表格直通等）。
@@ -159,10 +212,14 @@ function sanitizeHtml(html) {
 }
 
 /** 渲染视图：front matter 不作为正文渲染，转为元数据 chip 条 */
+const inlineImageUrls = new Map(); // assets 路径 → blob URL，跨重渲染复用
+
 function renderMarkdown() {
   const { frontMatter, body } = splitFrontMatter(current.markdown);
   const rendered = document.getElementById('rendered');
   rendered.innerHTML = sanitizeHtml(marked.parse(body, { breaks: false, gfm: true }));
+  // 「本地打包」预览：assets/ 相对引用换成内存图（扩展页无源站登录态，远程链接必裂）
+  InkUI.applyInlineImages(rendered, current.images, inlineImageUrls);
 
   // 重建同步滚动映射：只有当 marked token 数与本次实际渲染出的顶层 DOM 节点数
   // 严格一一对应时才可信（原始 HTML 块可能被 sanitizeHtml 整体删掉，或注释类
