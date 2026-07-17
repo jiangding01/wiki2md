@@ -51,6 +51,8 @@
 
 设置页可配置默认行为：Front Matter、评论呈现方式（脚注/附录）、图片策略、文件名模板。
 
+完整的安装与功能教程见 **[docs/USAGE.md](docs/USAGE.md)**。
+
 ## 架构
 
 ```
@@ -61,6 +63,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [docs/USAGE.md](docs/USAGE.md) | **使用教程**：安装与全部功能的详细用法（新用户从这里开始） |
 | [CHANGELOG.md](CHANGELOG.md) | 版本更新日志 |
 | [ROADMAP.md](ROADMAP.md) | 路线图（近期/中期/远期） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 开发指南：零构建、测试、适配器开发 SOP |
