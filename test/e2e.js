@@ -1320,6 +1320,106 @@ async function runPipeline(page, fixture, options) {
     assert(g.subTargeted === true, '显式定向（frameTargeted）的子 frame 消息正常处理');
   }
 
+  /* ---------- 用例 24：X (Twitter) 推文详情页 ---------- */
+  console.log('\n[24] XAdapter · 主推文+thread 正文 / 回复进评论区 / 广告剔除');
+  {
+    const pageX = await browser.newPage();
+    await pageX.goto('file://' + path.join(ROOT, 'test/fixtures', 'x-status.html'));
+    for (const f of CONTENT_FILES) {
+      await pageX.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    // file:// 下 hostname/URL 不匹配，绕过 match 直接调 extract
+    const x = await pageX.evaluate(async () => {
+      const matched = XAdapter.match(
+        { hostname: 'x.com', pathname: '/inkauthor/status/1001' });
+      const ir = await XAdapter.extract({ includeComments: true });
+      const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: true });
+      // 分析阶段的轻量路径：不滚动、产物带 _lite 标记（导出时强制完整重提）
+      const lite = await XAdapter.extract({ analyzeOnly: true, includeComments: true });
+      return {
+        matched, md,
+        title: ir.title,
+        byline: ir.byline,
+        publishedTime: ir.publishedTime,
+        annotations: ir.annotations.map(a => ({ author: a.author, content: a.content })),
+        warnings: ir.warnings,
+        fullHasLite: '_lite' in ir,
+        liteFlag: lite._lite === true,
+        liteWarn: lite.warnings.some(w => w.includes('导出时会自动滚动收集更多')),
+      };
+    });
+    await pageX.close();
+    assert(x.matched, 'x.com/twitter.com 的 /status/ 页面命中适配器');
+    assert(x.title === 'Ink Author：虚拟滚动的正确姿势🚀',
+      '推文标题 = 作者 + 正文首行（不再是 document.title 的整条推文形态）', x.title);
+    assert(x.byline === 'Ink Author @inkauthor', '作者与 @handle 提取', x.byline);
+    assert(x.publishedTime === '2026-07-15T08:00:00.000Z', '发布时间取主推 datetime');
+    assert(x.md.includes('虚拟滚动的正确姿势🚀') && x.md.includes('第一段结论'),
+      '主推文正文（emoji 从 img alt 还原、换行分段）', x.md.slice(0, 120));
+    assert(x.md.includes('补充：测量缓存是第二个关键。'),
+      '同 handle 连续 thread 续推并入正文');
+    assert(x.md.includes('https://pbs.twimg.com/media/ABC123?format=jpg&name=large'),
+      '推文图片缩略参数升级为 name=large', x.md.split('\n').find(l => l.includes('pbs.twimg')));
+    assert(x.annotations.length === 2 &&
+           x.annotations[0].author === 'Reader One @reader1' &&
+           x.annotations[1].content.includes('压测图（含 1 图）'),
+      '回复进评论通道（含图标注），广告卡片被剔除', JSON.stringify(x.annotations));
+    assert(x.md.includes('## 💬 评论') && x.md.includes('受教了，我们项目正好踩过这个坑👍'),
+      '回复呈现在文末评论区（emoji 保留）');
+    assert(x.warnings.some(w => w.includes('2 条回复')),
+      '按需加载的局限性明示告警', x.warnings.join(' | '));
+    assert(x.liteFlag && !x.fullHasLite,
+      '分析走轻量路径（_lite 标记，不滚动防页面闪白）、导出产物无标记');
+    assert(x.liteWarn, '轻量分析的告警提示「导出时收集更多」');
+  }
+
+  /* ---------- 用例 25：X Article（长文）模式（2026-07 用户实测 DOM） ---------- */
+  console.log('\n[25] XAdapter · Article 长文（DraftJS 正文 / 代码块剥壳 / 嵌入卡占位）');
+  {
+    const pageA = await browser.newPage();
+    await pageA.goto('file://' + path.join(ROOT, 'test/fixtures', 'x-article.html'));
+    for (const f of CONTENT_FILES) {
+      await pageA.addScriptTag({ path: path.join(ROOT, f) });
+    }
+    const a = await pageA.evaluate(async () => {
+      const matchArticleUrl = XAdapter.match(
+        { hostname: 'x.com', pathname: '/eternityspring/article/9001' });
+      const ir = await XAdapter.extract({ includeComments: true });
+      const md = InkMarkdown.render(ir, { frontMatter: false, includeComments: true });
+      return {
+        md,
+        matchArticleUrl,
+        title: ir.title,
+        byline: ir.byline,
+        publishedTime: ir.publishedTime,
+        annotations: ir.annotations.map(x => ({ author: x.author, content: x.content })),
+      };
+    });
+    await pageA.close();
+    assert(a.matchArticleUrl, '/article/<id> 形态的 URL 同样命中适配器');
+    assert(a.title === 'Cloudflare Worker + 域名：零成本搭建私人爬虫代理池',
+      'Article 标题从 document.title 的引号形态提取（剥未读计数前缀）', a.title);
+    assert(a.byline === '烁皓 @eternityspring' && a.publishedTime === '2026-07-14T08:00:00.000Z',
+      '作者/时间取自 Article 头卡（无 tweetText 的卡片）');
+    assert(a.md.includes('Cloudflare Worker 的免费额度是每天 10 万次请求') &&
+           a.md.includes('## Worker 为什么能做代理'),
+      'DraftJS 长文正文：段落与 h2 标题', a.md.slice(0, 150));
+    assert(/-\s+Cloudflare 账号（免费）/.test(a.md), '无序列表保留');
+    assert(/```javascript\nconst UA = "Mozilla\/5\.0";/.test(a.md) &&
+           !a.md.includes('Copy to clipboard'),
+      '代码块剥壳：语言标注保留、复制按钮外壳剔除', a.md.split('\n').find(l => l.includes('```')));
+    assert(a.md.includes('![创建 Worker](https://pbs.twimg.com/media/HE_Z3ENbAAAiUCK?format=jpg&name=large)') &&
+           a.md.includes('*创建 Worker*'),
+      '配图升级原图 + caption 转说明文字', a.md.split('\n').filter(l => l.includes('创建 Worker')).join(' | '));
+    assert(a.md.includes('[↗ 引用：Cloudflare Pages + CDN + 域名') &&
+           a.md.includes('/status/8001'),
+      '嵌入推文卡片 → 引用链接占位（不灌入卡片 UI 噪音）');
+    assert(a.md.includes('**获取内容**'), 'DraftJS inline style 粗体语义化');
+    assert(a.annotations.length === 1 && a.annotations[0].author === 'huang @horizon0627' &&
+           a.md.includes('## 💬 评论') && a.md.includes('公众号图片看不到哎'),
+      '时间线回复进评论区；头卡与嵌入卡不误入', JSON.stringify(a.annotations));
+  }
+
   await browser.close();
 
   /* ---------- 用例 11：注入清单一致性（防「忘记注册新文件」类回归） ----------

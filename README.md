@@ -4,7 +4,7 @@
 
 **把任意网页摘录为干净的 Markdown**
 
-任意网页兜底导出 · Confluence / 飞书 / 公众号 / 知乎 / 掘金 / CSDN / 语雀 / Stack Overflow 精配
+任意网页兜底导出 · Confluence / 飞书 / 公众号 / 知乎 / 掘金 / CSDN / 语雀 / Stack Overflow / X 精配
 划线评论转脚注 · 页面树整库导出（分卷 · 断点续传）· iframe 正文提取 · 图片打包 ZIP · Obsidian 友好
 
 </div>
@@ -22,7 +22,7 @@
 ## 功能
 
 - 🌐 **任意网页**：Readability 正文提取兜底，没有专门适配的网站也能导出
-- 🎯 **站点精配**：Confluence（含评论）、飞书文档（数据接口精配、含评论，失败自动回退滚动采集）、微信公众号、知乎、掘金、CSDN、语雀、Stack Overflow（问题 + 全部回答结构化导出）
+- 🎯 **站点精配**：Confluence（含评论）、飞书文档（数据接口精配、含评论，失败自动回退滚动采集）、微信公众号、知乎、掘金、CSDN、语雀、Stack Overflow（问题 + 全部回答结构化导出）、X/Twitter（主推文 + thread 续推为正文、回复进评论区，实验性）
 - 🛠 **自定义站点规则**：不写代码，填「URL 包含 + 正文选择器」即可精配任何站点（内网系统友好），优先级高于内置适配器，失配自动回退
 - 🪟 **iframe 正文提取**：正文藏在内嵌框架里的页面（网页邮箱、在线预览器）自动定位并提取——顶层优先，仅当顶层内容贫瘠且某个子框架显著更优时才切换，不被广告/评论 iframe 误导
 - 💬 **评论导出**：划线评论锚定为脚注 `[^1]`，页面评论汇入文末「💬 评论」区，回复嵌套呈现，自动分页拉全
@@ -72,7 +72,7 @@
 
 ```bash
 npm install playwright          # 测试依赖（仅本地）
-node test/e2e.js                # 真实 Chromium 中跑全管线断言（190 项）
+node test/e2e.js                # 真实 Chromium 中跑全管线断言（210 项）
 # 使用系统已有浏览器：CHROMIUM_PATH=/path/to/chrome node test/e2e.js
 ```
 
