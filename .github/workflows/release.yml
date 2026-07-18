@@ -1,0 +1,53 @@
+# 摘墨 · 发版自动化
+#
+# 触发：推送 vX.Y.Z 形态的 tag。
+# 流程：版本一致性门禁 → e2e 全量断言门禁 → 打包扩展 zip → 创建 GitHub Release。
+# 只有测试全绿、版本号自洽，才会发出 Release——发版是低频高风险操作，多花两分钟稳妥。
+#
+# 打新版本：改 manifest.json 版本号 + 补 CHANGELOG 章节 → 提交 → 打 tag 推送即可，
+#   例：git tag v1.5.0 && git push origin v1.5.0
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # 创建 Release 需要写权限
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 门禁：tag 版本号须与 manifest 一致、CHANGELOG 有对应章节。
+      # 放在最前——不满足就快速失败，不必等装完 Chromium 才发现版本错位。
+      - name: 校验版本并提取发版说明
+        id: notes
+        run: node scripts/release-notes.mjs
+
+      - name: 安装 playwright 与 Chromium
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+      # 门禁：与 e2e.yml 同一套断言，发出去的包必须是绿的
+      - name: 运行 e2e 全量断言
+        run: node test/e2e.js
+
+      - name: 打包扩展 zip
+        run: node scripts/pack.mjs
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 摘墨 Inkmark ${{ steps.notes.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          files: dist/inkmark-v*.zip
+          fail_on_unmatched_files: true # zip 没打出来就让发版失败，不发空壳 Release
